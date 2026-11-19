@@ -53,12 +53,22 @@ CORS/preflight y `x-correlation-id`. En GitHub Actions además se corre
 ## Despliegue en Render
 
 1. En Render: **New → Blueprint**, elegir este repositorio. Render lee
-   `render.yaml`, crea la base `productos-db` y el servicio `backend-rda2`.
-2. Cuando el servicio esté vivo, abrir su **Shell** y ejecutar una vez:
-   `npm run db:setup` (siembra la tabla).
+   `render.yaml`, crea la base `productos-db` y el servicio `backend-rda2`
+   con `AUTO_SETUP=true`.
+2. La siembra inicial (1000 productos) ocurre **sola al arrancar**: no hace
+   falta la Shell, que en el plan free no existe. Es idempotente, así que los
+   reinicios no duplican filas.
 3. URL resultante: `https://backend-rda2.onrender.com`.
 4. El frontend toma esa URL desde la variable `API_URL` del repositorio de
    GitHub Pages (`frontend-RDA2 → Settings → Variables`).
+
+Alternativa sin `AUTO_SETUP`: sembrar desde tu máquina con la *External
+Database URL* de Render:
+
+```bash
+export DATABASE_URL="postgres://...@dpg-xxxx.oregon-postgres.render.com/productos_db?sslmode=require"
+npm run db:setup
+```
 
 Nota: el plan free de Render duerme el servicio tras un rato sin tráfico; la
 primera petición después de dormir tarda unos segundos en responder.

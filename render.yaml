@@ -24,6 +24,9 @@ services:
         fromDatabase:
           name: productos-db
           property: connectionString
+      # Siembra inicial sin shell interactiva (idempotente en cada arranque)
+      - key: AUTO_SETUP
+        value: "true"
       # Origen exacto del frontend en GitHub Pages (CORS). En desarrollo local
       # se usa .env con CLIENT_ORIGIN=* o http://localhost:5500
       - key: CLIENT_ORIGIN
