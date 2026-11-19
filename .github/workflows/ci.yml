@@ -1,0 +1,58 @@
+name: verificaciones
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verificaciones-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verificar:
+    name: Sintaxis, humo HTTP y auditoria
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar el codigo
+        uses: actions/checkout@v4
+
+      - name: Preparar Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Instalar dependencias (lockfile estricto)
+        run: npm ci
+
+      - name: Auditar dependencias de produccion
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Reportar versiones instaladas
+        run: |
+          node --version
+          npm --version
+          npm ls --depth=0
+
+      - name: Verificacion (sintaxis + humo HTTP sin base de datos)
+        run: npm run verificar
+        env:
+          CLIENT_ORIGIN: https://macalderonr07.github.io
+          NODE_ENV: test
+
+  # Render despliega solo al ver este push a main (autoDeploy del blueprint).
+  # Si preferis desplegar desde Actions, descomenta el job y agrega el secreto
+  # RENDER_DEPLOY_HOOK (Settings > Deploy Hook en el servicio de Render).
+  # desplegar:
+  #   name: Desplegar en Render
+  #   needs: verificar
+  #   if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - name: Disparar deploy hook
+  #       run: curl -fsS -X POST "${{ secrets.RENDER_DEPLOY_HOOK }}"

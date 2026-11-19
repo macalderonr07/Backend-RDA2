@@ -1,0 +1,25 @@
+{
+  "name": "api-productos",
+  "version": "1.0.0",
+  "description": "API REST de Productos (Express + PostgreSQL, MVC, paginacion y versionamiento)",
+  "main": "src/server.js",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "db:setup": "node src/db/init.js",
+    "verificar": "node scripts/verificar.mjs"
+  },
+  "license": "ISC",
+  "dependencies": {
+    "cors": "^2.8.6",
+    "dotenv": "^16.4.7",
+    "express": "^5.3.0",
+    "express-validator": "^7.2.1",
+    "morgan": "^1.10.1",
+    "pg": "^8.13.1"
+  }
+}
