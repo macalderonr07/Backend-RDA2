@@ -1,0 +1,12 @@
+# Actualizaciones semanales de dependencias y de las acciones de GitHub.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /api-tienda
+    schedule: { interval: weekly }
+  - package-ecosystem: npm
+    directory: /api-administracion
+    schedule: { interval: weekly }
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly }

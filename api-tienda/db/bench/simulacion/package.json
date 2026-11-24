@@ -1,0 +1,16 @@
+{
+  "name": "simulacion-catalogo",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Simulacion a escala: Oracle (vista anterior / optimizada) vs cache NoSQL (Redis) sincronizada por outbox",
+  "scripts": {
+    "backend": "node backend.mjs",
+    "carga": "node carga.mjs",
+    "sincronia": "node sincronia.mjs"
+  },
+  "dependencies": {
+    "oracledb": "^6.7.0",
+    "redis": "^4.7.0"
+  }
+}

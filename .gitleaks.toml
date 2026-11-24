@@ -1,0 +1,8 @@
+# Reglas de gitleaks: las de siempre, salvo las plantillas .env.example,
+# que solo tienen los NOMBRES de las variables (sin valores).
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Plantillas de variables de entorno sin valores reales"
+paths = ['''(^|/)\.env\.example$''']

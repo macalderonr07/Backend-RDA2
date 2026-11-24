@@ -1,0 +1,204 @@
+# CI del backend de Comercial Elite (dos APIs Express + Oracle + Redis).
+#
+#   calidad      -> por API y por versión de Node (20 y 22, las que pide
+#                   "engines"): dependencias exactas del lockfile, árbol de
+#                   dependencias válido, sintaxis de todo el código.
+#   seguridad    -> npm audit (dependencias de producción) y búsqueda de
+#                   secretos en todo el historial (gitleaks).
+#   integracion  -> Oracle 23 Free y Redis como servicios: instala la base
+#                   desde cero (esquema, lógica, su suite de pruebas y las 18
+#                   migraciones), levanta las dos APIs y corre sus pruebas de
+#                   humo y la comparación caché vs Oracle.
+#
+# Las claves de la base y del JWT se generan al azar en cada corrida y se
+# enmascaran en el log: el repositorio no guarda ninguna.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  calidad:
+    name: Calidad · ${{ matrix.api }} · Node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        api: [api-tienda, api-administracion]
+        node: [20, 22]
+    defaults:
+      run:
+        working-directory: ${{ matrix.api }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: ${{ matrix.api }}/package-lock.json
+
+      - name: Instalar dependencias exactas del lockfile
+        run: npm ci --no-fund
+
+      - name: Árbol de dependencias válido (versiones que cumplen package.json)
+        run: npm ls --omit=dev --all > /dev/null
+
+      - name: La versión de Node cumple "engines"
+        run: node -e 'const r=require("./package.json").engines?.node; if(!r){process.exit(0)} const min=Number(r.replace(/[^\d.]/g,"").split(".")[0]); const v=Number(process.versions.node.split(".")[0]); if(v<min){console.error(`Node ${v} < ${r}`);process.exit(1)} console.log(`Node ${process.versions.node} cumple ${r}`)'
+
+      - name: Sintaxis de todo el código (src, scripts, db)
+        run: |
+          find src scripts db -name '*.js' -o -name '*.mjs' 2>/dev/null | sort | while read -r f; do
+            node --check "$f" || exit 1
+          done
+          echo "Sintaxis correcta en $(find src scripts db -name '*.js' -o -name '*.mjs' 2>/dev/null | wc -l) archivos"
+
+      - name: Express y el driver de Oracle cargan
+        run: node -e 'import("express").then(()=>import("oracledb")).then(o=>console.log("express ok · oracledb", o.default.versionString))'
+
+  seguridad:
+    name: Seguridad
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - name: npm audit (dependencias de producción, severidad alta o más)
+        run: |
+          for api in api-tienda api-administracion; do
+            echo "::group::$api"
+            (cd "$api" && npm audit --omit=dev --audit-level=high)
+            echo "::endgroup::"
+          done
+
+      - name: Búsqueda de secretos en todo el historial (gitleaks)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  integracion:
+    name: Integración (Oracle + Redis + APIs)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: calidad
+    services:
+      oracle:
+        image: gvenzl/oracle-free:slim-faststart
+        env:
+          ORACLE_RANDOM_PASSWORD: "true"
+        ports:
+          - 1521:1521
+        options: >-
+          --health-cmd healthcheck.sh
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 40
+      redis:
+        image: redis:7.4-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      ORACLE_CONNECT_STRING: localhost:1521/FREEPDB1
+      REDIS_URL: redis://localhost:6379
+      ADMIN_CORREO: admin@comercialelite.ec
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            api-tienda/package-lock.json
+            api-administracion/package-lock.json
+
+      - name: Generar claves de esta corrida (enmascaradas)
+        run: |
+          gen() { echo "C$(openssl rand -hex 12)"; }
+          for v in CLAVE_PRODUCCION CLAVE_ECOMMERCE CLAVE_APP_WEB CLAVE_APP_ADMIN; do
+            c="$(gen)"; echo "::add-mask::$c"; echo "$v=$c" >> "$GITHUB_ENV"
+          done
+          c="Ci$(openssl rand -hex 10)X9"; echo "::add-mask::$c"; echo "ADMIN_CLAVE=$c" >> "$GITHUB_ENV"
+          c="$(openssl rand -hex 32)"; echo "::add-mask::$c"; echo "JWT_SECRETO=$c" >> "$GITHUB_ENV"
+
+      - name: Instalar la base desde cero (esquema, lógica, pruebas de la base y migraciones)
+        env:
+          MOTOR: docker
+          CONTENEDOR: ${{ job.services.oracle.id }}
+        run: ./base-de-datos/instalar.sh
+
+      - name: Instalar dependencias de las APIs
+        run: |
+          (cd api-tienda && npm ci --no-fund --no-audit)
+          (cd api-administracion && npm ci --no-fund --no-audit)
+
+      - name: Primer administrador (semilla)
+        working-directory: api-administracion
+        env:
+          ORACLE_USER: app_admin
+          ORACLE_PASSWORD: ${{ env.CLAVE_APP_ADMIN }}
+          ORACLE_SCHEMA: PRODUCCION
+        run: npm run semilla
+
+      - name: Levantar las dos APIs
+        run: |
+          mkdir -p logs
+          (cd api-tienda && PORT=5050 ORACLE_USER=app_web ORACLE_PASSWORD="$CLAVE_APP_WEB" ORACLE_SCHEMA=ECOMMERCE \
+            nohup node src/server.js > ../logs/api-tienda.log 2>&1 &)
+          (cd api-administracion && PORT=5070 ORACLE_USER=app_admin ORACLE_PASSWORD="$CLAVE_APP_ADMIN" ORACLE_SCHEMA=PRODUCCION \
+            nohup node src/server.js > ../logs/api-administracion.log 2>&1 &)
+          for i in $(seq 1 30); do
+            t=$(curl -s -o /dev/null -w '%{http_code}' localhost:5050/api/v1/productos || true)
+            a=$(curl -s -o /dev/null -w '%{http_code}' localhost:5070/api/v1/meta || true)
+            [ "$t" = "200" ] && [ "$a" = "401" ] && { echo "APIs arriba (tienda $t, administración $a sin token)"; exit 0; }
+            sleep 2
+          done
+          echo "Las APIs no respondieron"; exit 1
+
+      - name: Humo de la API de la tienda
+        working-directory: api-tienda
+        run: npm run humo
+
+      - name: La caché (Redis) responde idéntico a Oracle
+        working-directory: api-tienda
+        env:
+          ORACLE_USER: app_web
+          ORACLE_PASSWORD: ${{ env.CLAVE_APP_WEB }}
+          ORACLE_SCHEMA: ECOMMERCE
+        run: npm run comparar-cache
+
+      - name: Humo de la API de administración
+        working-directory: api-administracion
+        env:
+          ORACLE_USER: app_admin
+          ORACLE_PASSWORD: ${{ env.CLAVE_APP_ADMIN }}
+          ORACLE_SCHEMA: PRODUCCION
+        run: npm run humo
+
+      - name: Logs de las APIs (si algo falló)
+        if: failure()
+        run: tail -n 80 logs/*.log || true

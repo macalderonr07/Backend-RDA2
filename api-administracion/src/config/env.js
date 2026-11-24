@@ -1,0 +1,43 @@
+// src/config/env.js
+// Carga .env desde la raiz del proyecto (independiente del cwd) y falla al
+// arrancar si falta algo obligatorio: mejor un error claro al iniciar que un
+// 500 en la primera peticion.
+import dotenv from "dotenv";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const raiz = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+dotenv.config({ path: resolve(raiz, ".env"), quiet: true });
+
+const OBLIGATORIAS = ["ORACLE_USER", "ORACLE_PASSWORD", "ORACLE_CONNECT_STRING", "JWT_SECRETO"];
+const faltantes = OBLIGATORIAS.filter((nombre) => !process.env[nombre]);
+if (faltantes.length > 0) {
+    throw new Error(`Faltan variables de entorno: ${faltantes.join(", ")} (ver .env.example)`);
+}
+if (process.env.JWT_SECRETO.length < 32) {
+    throw new Error("JWT_SECRETO debe tener al menos 32 caracteres");
+}
+
+const entero = (valor, porDefecto) => {
+    const n = Number.parseInt(valor, 10);
+    return Number.isInteger(n) && n > 0 ? n : porDefecto;
+};
+
+export const config = Object.freeze({
+    port: entero(process.env.PORT, 5070),
+    clientOrigin: process.env.CLIENT_ORIGIN ?? "",
+    oracle: Object.freeze({
+        user: process.env.ORACLE_USER,
+        password: process.env.ORACLE_PASSWORD,
+        connectString: process.env.ORACLE_CONNECT_STRING,
+        // Solo letras, digitos y _: es el esquema de los modelos (no admite binds)
+        schema: /^[A-Za-z][A-Za-z0-9_]{0,127}$/.test(process.env.ORACLE_SCHEMA ?? "")
+            ? process.env.ORACLE_SCHEMA.toUpperCase()
+            : "PRODUCCION",
+        poolMax: entero(process.env.ORACLE_POOL_MAX, 5),
+    }),
+    jwt: Object.freeze({
+        secreto: process.env.JWT_SECRETO,
+        duracion: process.env.JWT_DURACION ?? "8h",
+    }),
+});
