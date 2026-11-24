@@ -60,9 +60,26 @@ Oracle, Redis y las APIs viven en la red interna de Docker.
   Students**, que trae crédito y no pide tarjeta.
 - La CLI de Azure (`az`) en tu equipo:
   <https://learn.microsoft.com/cli/azure/install-azure-cli>.
-- Tamaño de la VM: **Standard_B2ms** (2 vCPU, 8 GiB) va holgada.
-  **Standard_B2s** (2 vCPU, 4 GiB) alcanza si quieres gastar menos crédito, porque
-  Oracle Free usa como máximo 2 GB. El precio depende de la región: revisa la
+- **Regiones de Azure for Students:** la suscripción tiene una política que
+  solo permite algunas regiones. En otra región, `az vm create` falla con
+  `RequestDisallowedByAzure`. Para ver cuáles tienes:
+
+  ```bash
+  az policy assignment list --query "[].parameters.listOfAllowedLocations.value" -o tsv
+  ```
+
+  En noviembre de 2026 eran `westus`, `northcentralus`, `canadacentral`,
+  `brazilsouth` y `chilecentral`. Desde Ecuador conviene **`chilecentral`**, por
+  ser la más cercana.
+- Tamaño de la VM: **Standard_B2as_v2** (2 vCPU AMD, 8 GiB), de la serie B
+  nueva. En Chile Central no hay B2ms ni B2s; para ver qué tamaños tiene una
+  región:
+
+  ```bash
+  az vm list-skus -l chilecentral --resource-type virtualMachines --query "[?starts_with(name,'Standard_B2')].name" -o tsv
+  ```
+
+  El precio depende de la región: revisa la
   [calculadora](https://azure.microsoft.com/pricing/calculator/).
 
 ## 3. Crear la máquina virtual
@@ -71,13 +88,14 @@ En tu equipo, reemplazando `<etiqueta>` por un nombre único (será parte del do
 
 ```bash
 az login
-az group create --name rg-comercial-elite --location eastus2
+az group create --name rg-comercial-elite --location chilecentral
 
 az vm create \
   --resource-group rg-comercial-elite \
   --name vm-elite \
+  --location chilecentral \
   --image Ubuntu2404 \
-  --size Standard_B2ms \
+  --size Standard_B2as_v2 \
   --os-disk-size-gb 64 \
   --admin-username elite \
   --generate-ssh-keys \
@@ -89,7 +107,7 @@ az vm open-port -g rg-comercial-elite -n vm-elite --port 80  --priority 900
 az vm open-port -g rg-comercial-elite -n vm-elite --port 443 --priority 910
 ```
 
-El dominio queda como **`<etiqueta>.eastus2.cloudapp.azure.com`**. Lo puedes
+El dominio queda como **`<etiqueta>.chilecentral.cloudapp.azure.com`**. Lo puedes
 ver con:
 
 ```bash
@@ -106,7 +124,7 @@ az network nsg rule update -g rg-comercial-elite --nsg-name vm-eliteNSG \
 ## 4. Preparar el servidor
 
 ```bash
-ssh elite@<etiqueta>.eastus2.cloudapp.azure.com
+ssh elite@<etiqueta>.chilecentral.cloudapp.azure.com
 
 sudo apt update && sudo apt install -y docker.io docker-compose-v2 git
 sudo usermod -aG docker "$USER" && exit      # salir y volver a entrar para usar docker sin sudo
@@ -115,7 +133,7 @@ sudo usermod -aG docker "$USER" && exit      # salir y volver a entrar para usar
 ## 5. Configurar y levantar
 
 ```bash
-ssh elite@<etiqueta>.eastus2.cloudapp.azure.com
+ssh elite@<etiqueta>.chilecentral.cloudapp.azure.com
 git clone https://github.com/macalderonr07/Backend-RDA2.git
 cd Backend-RDA2/despliegue
 cp .env.example .env && chmod 600 .env
@@ -126,7 +144,7 @@ Completa `.env`. Genera cada clave con el comando que indica el archivo:
 
 | Variable | Valor |
 |---|---|
-| `DOMINIO` | `<etiqueta>.eastus2.cloudapp.azure.com` |
+| `DOMINIO` | `<etiqueta>.chilecentral.cloudapp.azure.com` |
 | `CLIENT_ORIGIN` | `https://macalderonr07.github.io`, el origen de los dos frontends en Pages |
 | `ORACLE_SYS_PASSWORD`, `CLAVE_*` | `echo "C$(openssl rand -hex 12)"` (una distinta para cada una) |
 | `JWT_SECRETO` | `openssl rand -hex 32` |
@@ -223,6 +241,8 @@ Al terminar el semestre, `az group delete -n rg-comercial-elite` borra todo.
 | Síntoma | Causa probable |
 |---|---|
 | Caddy no obtiene el certificado | Los puertos 80/443 no están abiertos (paso 3), o `DOMINIO` no coincide con el FQDN de la VM |
-| `primera-vez.sh` se queda esperando a Oracle | La primera creación tarda. Revisa `docker compose logs oracle`. Con B2s y poca memoria libre, prueba con B2ms |
+| `az vm create` falla con `RequestDisallowedByAzure` | La región no está permitida en tu suscripción (Azure for Students). Mira el §2 y usa una de las permitidas |
+| `primera-vez.sh` se queda esperando a Oracle | La primera creación tarda. Revisa `docker compose logs oracle` |
+| `permission denied` con `docker` justo después de instalarlo | El grupo `docker` se aplica al volver a entrar por SSH. También puedes usar `sg docker -c "./primera-vez.sh"` |
 | La API responde 502 | La API no arrancó: `docker compose logs api-tienda` (suele ser una clave mal copiada en `.env`) |
 | El frontend dice "Failed to fetch" | Falta el origen en `CLIENT_ORIGIN` (y después `docker compose up -d`), o la variable `*_API_URL` no tiene `https://` |
