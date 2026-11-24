@@ -12,8 +12,9 @@
 #   ./base-de-datos/instalar.sh
 #
 # MOTOR=docker (por defecto) o podman. Las claves nunca se imprimen.
-# Todas las migraciones se pueden correr mas de una vez; el esquema base no
-# (para reinstalar: DROP USER ecommerce CASCADE; DROP USER produccion CASCADE;).
+# Todas las migraciones se pueden correr mas de una vez. El esquema base no:
+# si PRODUCCION ya existe se salta y solo se aplican las migraciones (asi el
+# mismo script sirve para actualizar una base en uso).
 set -euo pipefail
 
 MOTOR="${MOTOR:-docker}"
@@ -74,9 +75,16 @@ SQL
     "$MOTOR" exec "$CONTENEDOR" rm -f "/tmp/correr.sql"
 }
 
-correr "$RAIZ/base-de-datos/oracle/ComercialElite_Oracle_1_esquema.sql"
-correr "$RAIZ/base-de-datos/oracle/ComercialElite_Oracle_2_logica.sql"
-correr "$RAIZ/base-de-datos/oracle/ComercialElite_Oracle_3_prueba.sql"
+# El esquema base no se puede correr dos veces (CREATE USER): si ya existe,
+# solo se aplican las migraciones (asi el mismo script sirve para actualizar).
+existe="$("$MOTOR" exec "$CONTENEDOR" bash -lc "printf 'SET HEADING OFF FEEDBACK OFF PAGESIZE 0\nALTER SESSION SET CONTAINER = $PDB;\nSELECT COUNT(*) FROM dba_users WHERE username = '\''PRODUCCION'\'';\nEXIT\n' | sqlplus -s -L / as sysdba" | tr -dc '0-9')"
+if [[ "$existe" == "1" ]]; then
+    echo "• El esquema PRODUCCION ya existe: se aplican solo las migraciones."
+else
+    correr "$RAIZ/base-de-datos/oracle/ComercialElite_Oracle_1_esquema.sql"
+    correr "$RAIZ/base-de-datos/oracle/ComercialElite_Oracle_2_logica.sql"
+    correr "$RAIZ/base-de-datos/oracle/ComercialElite_Oracle_3_prueba.sql"
+fi
 
 # Migraciones en orden numerico, sin importar en que API viven
 mapfile -t migraciones < <(
@@ -90,4 +98,4 @@ for m in "${migraciones[@]}"; do
         *) correr "$m" ;;
     esac
 done
-echo "✔ Base instalada: esquema, lógica y ${#migraciones[@]} migraciones."
+echo "✔ Base lista: ${#migraciones[@]} migraciones aplicadas."

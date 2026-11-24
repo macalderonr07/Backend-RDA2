@@ -61,6 +61,19 @@ cd api-administracion && npm ci && npm run semilla && npm start   # http://local
 | `api-tienda`: `npm run medir-cache` | Rendimiento con 32 clientes simultáneos |
 | `api-administracion`: `npm run humo` | 83 pruebas: autenticación, permisos, productos, inventario por producto, compras en unidad del proveedor, ventas, cobros, reportes |
 
+## Despliegue
+
+[`despliegue/`](despliegue/) levanta todo en un servidor con Docker:
+
+- Oracle 23 Free (volumen persistente);
+- Redis;
+- las dos APIs (con su `Dockerfile`, usuario sin privilegios);
+- Caddy, con HTTPS automático.
+
+Para la primera instalación y cada actualización se usa `./primera-vez.sh`.
+Guía paso a paso para Azure, con el porqué de cada decisión:
+**[docs/despliegue-azure.md](docs/despliegue-azure.md)**.
+
 ## Integración continua (GitHub Actions)
 
 [`ci.yml`](.github/workflows/ci.yml) tiene tres jobs:
@@ -73,6 +86,8 @@ cd api-administracion && npm ci && npm run semilla && npm start   # http://local
   - que Express y `oracledb` carguen.
 - **seguridad:** `npm audit` de las dependencias de producción (severidad
   alta o más) y gitleaks sobre todo el historial.
+- **contenedores:** construye las dos imágenes (sin root) y valida
+  `docker-compose.yml` y el `Caddyfile`.
 - **integración:** Oracle y Redis corren como servicios. Instala la base
   desde cero con `instalar.sh`, siembra el administrador, levanta las dos APIs
   y corre los dos humos y la comparación de caché. Las claves se generan al azar

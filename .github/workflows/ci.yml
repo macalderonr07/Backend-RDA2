@@ -5,6 +5,8 @@
 #                   dependencias válido, sintaxis de todo el código.
 #   seguridad    -> npm audit (dependencias de producción) y búsqueda de
 #                   secretos en todo el historial (gitleaks).
+#   contenedores -> construye las imágenes de las dos APIs (Dockerfile) y
+#                   valida despliegue/docker-compose.yml y el Caddyfile.
 #   integracion  -> Oracle 23 Free y Redis como servicios: instala la base
 #                   desde cero (esquema, lógica, su suite de pruebas y las 18
 #                   migraciones), levanta las dos APIs y corre sus pruebas de
@@ -94,6 +96,39 @@ jobs:
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  contenedores:
+    name: Imágenes y despliegue
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Construir las imágenes de las APIs
+        run: |
+          docker build -t ce-api-tienda:ci api-tienda
+          docker build -t ce-api-administracion:ci api-administracion
+
+      - name: Las imágenes arrancan como usuario sin privilegios y traen lo necesario
+        run: |
+          for i in ce-api-tienda:ci ce-api-administracion:ci; do
+            u=$(docker run --rm --entrypoint id "$i" -u); [ "$u" != "0" ] || { echo "$i corre como root"; exit 1; }
+            docker run --rm --entrypoint node "$i" -e 'import("express").then(()=>import("oracledb")).then(()=>console.log("ok"))'
+          done
+          docker run --rm --entrypoint ls ce-api-administracion:ci scripts/semilla-admin.mjs
+
+      - name: Validar docker-compose.yml (con valores de ejemplo)
+        working-directory: despliegue
+        run: |
+          printf 'DOMINIO=ejemplo.local\nORACLE_SYS_PASSWORD=x\nCLAVE_APP_WEB=x\nCLAVE_APP_ADMIN=x\nJWT_SECRETO=x\n' > .env
+          docker compose config --quiet && echo "docker-compose.yml válido"
+          rm .env
+
+      - name: Validar el Caddyfile
+        run: docker run --rm -e DOMINIO=ejemplo.local -v "$PWD/despliegue/Caddyfile:/etc/caddy/Caddyfile:ro" caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+
+      - name: Sintaxis de los scripts de shell
+        run: bash -n base-de-datos/instalar.sh && bash -n despliegue/primera-vez.sh && echo ok
 
   integracion:
     name: Integración (Oracle + Redis + APIs)

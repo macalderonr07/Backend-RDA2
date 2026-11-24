@@ -1,0 +1,12 @@
+node_modules
+.env
+.env.*
+!.env.example
+*.log
+db
+scripts/humo.mjs
+scripts/comparar-cache.mjs
+scripts/medir-cache.mjs
+scripts/generar-modelos.mjs
+Dockerfile
+.dockerignore

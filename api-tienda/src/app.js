@@ -19,6 +19,14 @@ import productosV1Router from "./routes/v1/productos.routes.js";
 export const app = express();
 
 app.disable("x-powered-by"); // no anunciar el framework
+// Detras de un proxy (Caddy/nginx en el despliegue) req.ip seria la IP del
+// proxy: TRUST_PROXY le dice a Express en cuales confiar para leer
+// X-Forwarded-For (p. ej. "uniquelocal" = redes privadas de Docker). Sin la
+// variable no se confia en nadie (seguro por defecto: nadie falsifica su IP).
+if (process.env.TRUST_PROXY) {
+    const valor = process.env.TRUST_PROXY.trim();
+    app.set("trust proxy", /^\d+$/.test(valor) ? Number(valor) : valor.split(",").map((x) => x.trim()));
+}
 app.use(express.json({ limit: "100kb" }));
 app.use(setupCors(config.clientOrigin));
 app.use(correlation);

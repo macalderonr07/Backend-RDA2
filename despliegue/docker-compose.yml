@@ -1,0 +1,91 @@
+# Despliegue del backend de Comercial Elite en UN servidor (p. ej. una VM de
+# Azure) con Docker: Oracle 23 Free, Redis, las dos APIs y Caddy (HTTPS
+# automático con Let's Encrypt). Solo Caddy publica puertos (80/443): Oracle,
+# Redis y las APIs quedan en la red interna de Docker.
+#
+#   https://$DOMINIO/tienda/api/v1  -> api-tienda
+#   https://$DOMINIO/admin/api/v1   -> api-administracion
+#
+# Primera vez: ./primera-vez.sh (levanta Oracle, instala la base, siembra el
+# administrador y levanta todo). Después: docker compose up -d --build
+name: comercial-elite
+
+services:
+  oracle:
+    # "slim" (no "faststart"): crea la base en el volumen y la conserva entre reinicios
+    image: docker.io/gvenzl/oracle-free:23-slim
+    environment:
+      ORACLE_PASSWORD: ${ORACLE_SYS_PASSWORD:?Define ORACLE_SYS_PASSWORD en .env}
+    volumes:
+      - oracle-datos:/opt/oracle/oradata
+    healthcheck:
+      test: ["CMD", "healthcheck.sh"]
+      interval: 15s
+      timeout: 10s
+      retries: 60
+      start_period: 120s
+    restart: unless-stopped
+
+  redis:
+    # Caché del catálogo: sin persistencia (si se pierde, la API la reconstruye desde Oracle)
+    image: docker.io/library/redis:7.4-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  api-tienda:
+    build: ../api-tienda
+    environment:
+      PORT: "5050"
+      ORACLE_USER: app_web
+      ORACLE_PASSWORD: ${CLAVE_APP_WEB:?Define CLAVE_APP_WEB en .env}
+      ORACLE_CONNECT_STRING: oracle:1521/FREEPDB1
+      ORACLE_SCHEMA: ECOMMERCE
+      REDIS_URL: redis://redis:6379
+      CLIENT_ORIGIN: ${CLIENT_ORIGIN:-}
+      TRUST_PROXY: uniquelocal
+    depends_on:
+      oracle: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    restart: unless-stopped
+
+  api-administracion:
+    build: ../api-administracion
+    environment:
+      PORT: "5070"
+      ORACLE_USER: app_admin
+      ORACLE_PASSWORD: ${CLAVE_APP_ADMIN:?Define CLAVE_APP_ADMIN en .env}
+      ORACLE_CONNECT_STRING: oracle:1521/FREEPDB1
+      ORACLE_SCHEMA: PRODUCCION
+      JWT_SECRETO: ${JWT_SECRETO:?Define JWT_SECRETO en .env}
+      ADMIN_CORREO: ${ADMIN_CORREO:-}
+      ADMIN_CLAVE: ${ADMIN_CLAVE:-}
+      CLIENT_ORIGIN: ${CLIENT_ORIGIN:-}
+      TRUST_PROXY: uniquelocal
+    depends_on:
+      oracle: { condition: service_healthy }
+    restart: unless-stopped
+
+  caddy:
+    image: docker.io/library/caddy:2-alpine
+    environment:
+      DOMINIO: ${DOMINIO:?Define DOMINIO en .env}
+    ports:
+      - "${PUERTO_HTTP:-80}:80"
+      - "${PUERTO_HTTPS:-443}:443"
+    volumes:
+      # z: etiqueta SELinux (Fedora/RHEL); en Ubuntu no tiene efecto
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro,z
+      - caddy-datos:/data
+      - caddy-config:/config
+    depends_on: [api-tienda, api-administracion]
+    restart: unless-stopped
+
+volumes:
+  oracle-datos:
+  caddy-datos:
+  caddy-config:

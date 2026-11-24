@@ -1,0 +1,24 @@
+# Proxy HTTPS de las dos APIs. Caddy pide y renueva solo el certificado de
+# Let's Encrypt para {$DOMINIO} (necesita los puertos 80 y 443 abiertos).
+# Con DOMINIO=localhost usa un certificado local (pruebas).
+{$DOMINIO} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		-Server
+	}
+
+	# /tienda/api/v1/... -> api-tienda:5050/api/v1/...  (handle_path quita el prefijo)
+	handle_path /tienda/* {
+		reverse_proxy api-tienda:5050
+	}
+	handle_path /admin/* {
+		reverse_proxy api-administracion:5070
+	}
+	handle {
+		respond "Comercial Elite: las APIs están en /tienda/api/v1 y /admin/api/v1" 404
+	}
+}
