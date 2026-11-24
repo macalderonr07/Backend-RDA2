@@ -186,6 +186,17 @@ jobs:
           CONTENEDOR: ${{ job.services.oracle.id }}
         run: ./base-de-datos/instalar.sh
 
+      # Lo mismo que hace primera-vez.sh al actualizar el servidor: una segunda
+      # corrida no debe repetir ninguna migracion (el registro las salta).
+      - name: Actualizar sobre la base ya instalada (no repite migraciones)
+        env:
+          MOTOR: docker
+          CONTENEDOR: ${{ job.services.oracle.id }}
+        run: |
+          salida="$(./base-de-datos/instalar.sh)"
+          echo "$salida"
+          grep -q "Base lista: 0 migraciones nuevas aplicadas" <<<"$salida"
+
       - name: Instalar dependencias de las APIs
         run: |
           (cd api-tienda && npm ci --no-fund --no-audit)

@@ -12,9 +12,12 @@
 #   ./base-de-datos/instalar.sh
 #
 # MOTOR=docker (por defecto) o podman. Las claves nunca se imprimen.
-# Todas las migraciones se pueden correr mas de una vez. El esquema base no:
-# si PRODUCCION ya existe se salta y solo se aplican las migraciones (asi el
-# mismo script sirve para actualizar una base en uso).
+# Sirve para instalar y para ACTUALIZAR una base en uso:
+#   - el esquema base solo se crea si PRODUCCION no existe;
+#   - cada migracion se aplica UNA sola vez: la tabla produccion.migracion_aplicada
+#     registra las ya aplicadas (como Flyway/Liquibase). Volver a correr una
+#     migracion vieja contra un esquema que cambio despues falla (p. ej. la 08
+#     usa una columna que la 09 reemplazo), por eso nunca se repiten.
 set -euo pipefail
 
 MOTOR="${MOTOR:-docker}"
@@ -86,16 +89,81 @@ else
     correr "$RAIZ/base-de-datos/oracle/ComercialElite_Oracle_3_prueba.sql"
 fi
 
+# Consulta de una linea como SYSDBA en la PDB (sin claves).
+consultar() {
+    local salida
+    if ! salida="$("$MOTOR" exec -i "$CONTENEDOR" bash -lc "sqlplus -s -L / as sysdba" <<SQL
+WHENEVER SQLERROR EXIT FAILURE
+SET HEADING OFF FEEDBACK OFF PAGESIZE 0 LINESIZE 400 TRIMOUT ON
+ALTER SESSION SET CONTAINER = $PDB;
+$1
+EXIT
+SQL
+)"; then
+        echo "$salida" | tail -15 >&2
+        echo "✖ Falló una consulta del registro de migraciones" >&2
+        exit 1
+    fi
+    sed '/^[[:space:]]*$/d' <<<"$salida"
+}
+
+# Registro de migraciones aplicadas
+consultar "DECLARE v_n NUMBER; BEGIN
+  SELECT COUNT(*) INTO v_n FROM dba_tables WHERE owner = 'PRODUCCION' AND table_name = 'MIGRACION_APLICADA';
+  IF v_n = 0 THEN
+    EXECUTE IMMEDIATE 'CREATE TABLE produccion.migracion_aplicada (
+        mig_nombre   VARCHAR2(100) NOT NULL,
+        mig_sha256   VARCHAR2(64),
+        mig_aplicada TIMESTAMP DEFAULT SYSTIMESTAMP NOT NULL,
+        CONSTRAINT pk_migracion_aplicada PRIMARY KEY (mig_nombre))';
+    EXECUTE IMMEDIATE 'COMMENT ON TABLE produccion.migracion_aplicada IS ''Migraciones ya aplicadas por base-de-datos/instalar.sh (cada una corre una sola vez)''';
+  END IF;
+END;
+/" > /dev/null
+
 # Migraciones en orden numerico, sin importar en que API viven
 mapfile -t migraciones < <(
     { ls "$RAIZ"/api-tienda/db/[0-9][0-9]_*.sql; ls "$RAIZ"/api-administracion/db/[0-9][0-9]_*.sql; } |
         awk -F/ '{print $NF "\t" $0}' | sort | cut -f2
 )
+
+# Bases instaladas ANTES de existir el registro: se instalaron completas con las
+# migraciones 01..18 (instalar.sh las corria todas). Se registran como aplicadas
+# solo si la base tiene lo que crea la 18 (la outbox del catalogo); si no, se
+# detiene en vez de adivinar.
+registradas="$(consultar "SELECT COUNT(*) FROM produccion.migracion_aplicada;" | tr -dc '0-9')"
+if [[ "$existe" == "1" && "$registradas" == "0" ]]; then
+    outbox="$(consultar "SELECT COUNT(*) FROM dba_tables WHERE owner = 'PRODUCCION' AND table_name = 'CATALOGO_CAMBIO';" | tr -dc '0-9')"
+    if [[ "$outbox" != "1" ]]; then
+        echo "✖ La base existe pero no tiene registro de migraciones ni la outbox de la 18:" >&2
+        echo "  no se puede saber cuales migraciones tiene. Revisarla a mano antes de continuar." >&2
+        exit 1
+    fi
+    echo "• Base anterior al registro de migraciones: se registran 01..18 como ya aplicadas."
+    for m in "${migraciones[@]}"; do
+        nombre="$(basename "$m")"
+        (( 10#${nombre:0:2} <= 18 )) || continue
+        consultar "INSERT INTO produccion.migracion_aplicada (mig_nombre, mig_sha256) VALUES ('$nombre', '$(sha256sum "$m" | cut -c1-64)');
+COMMIT;" > /dev/null
+    done
+fi
+
+aplicadas=0
 for m in "${migraciones[@]}"; do
-    case "$(basename "$m")" in
+    nombre="$(basename "$m")"
+    huella="$(sha256sum "$m" | cut -c1-64)"
+    registrada="$(consultar "SELECT NVL(MAX(mig_sha256), '-') FROM produccion.migracion_aplicada WHERE mig_nombre = '$nombre';" | tr -dc 'a-f0-9-')"
+    if [[ -n "$registrada" && "$registrada" != "-" ]]; then
+        [[ "$registrada" == "$huella" ]] || echo "⚠ $nombre cambio desde que se aplico: NO se vuelve a correr (un cambio de esquema va en una migracion nueva)."
+        continue
+    fi
+    case "$nombre" in
         01_usuario_app.sql) correr "$m" "$CLAVE_APP_WEB" ;;
         11_administracion.sql) correr "$m" "$CLAVE_APP_ADMIN" ;;
         *) correr "$m" ;;
     esac
+    consultar "INSERT INTO produccion.migracion_aplicada (mig_nombre, mig_sha256) VALUES ('$nombre', '$huella');
+COMMIT;" > /dev/null
+    aplicadas=$((aplicadas + 1))
 done
-echo "✔ Base lista: ${#migraciones[@]} migraciones aplicadas."
+echo "✔ Base lista: $aplicadas migraciones nuevas aplicadas (${#migraciones[@]} en total registradas)."
