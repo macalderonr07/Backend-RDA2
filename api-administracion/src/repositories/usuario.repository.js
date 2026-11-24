@@ -1,7 +1,7 @@
 // src/repositories/usuario.repository.js
 // Usuarios internos, sus roles y la relacion con la ficha de empleado. El hash
 // de la clave nunca sale de este archivo.
-import { Op, literal } from "sequelize";
+import { Op } from "sequelize";
 import { conUsuario, consulta } from "../config/db.js";
 import { m } from "../models/index.js";
 
