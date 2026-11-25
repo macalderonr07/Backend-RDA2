@@ -16,6 +16,8 @@ services:
     image: docker.io/gvenzl/oracle-free:23-slim
     environment:
       ORACLE_PASSWORD: ${ORACLE_SYS_PASSWORD:?Define ORACLE_SYS_PASSWORD en .env}
+      # SYSDATE de la base en hora de Ecuador (novedades, vencimientos)
+      TZ: America/Guayaquil
     volumes:
       - oracle-datos:/opt/oracle/oradata
     healthcheck:
@@ -42,6 +44,7 @@ services:
     environment:
       PORT: "5050"
       ORACLE_USER: app_web
+      ZONA_HORARIA: America/Guayaquil
       ORACLE_PASSWORD: ${CLAVE_APP_WEB:?Define CLAVE_APP_WEB en .env}
       ORACLE_CONNECT_STRING: oracle:1521/FREEPDB1
       ORACLE_SCHEMA: ECOMMERCE
@@ -58,6 +61,7 @@ services:
     environment:
       PORT: "5070"
       ORACLE_USER: app_admin
+      ZONA_HORARIA: America/Guayaquil
       ORACLE_PASSWORD: ${CLAVE_APP_ADMIN:?Define CLAVE_APP_ADMIN en .env}
       ORACLE_CONNECT_STRING: oracle:1521/FREEPDB1
       ORACLE_SCHEMA: PRODUCCION

@@ -2,7 +2,7 @@
 
 Backend del sistema de administración: catálogo de productos, inventario,
 compras, ventas en tienda, talento humano, usuarios y reportes. Sigue la
-arquitectura de [`Mi_servidor/api-productos/ARQUITECTURA.md`](../../../Mi_servidor/api-productos/ARQUITECTURA.md):
+arquitectura de [`docs/ARQUITECTURA.md`](../docs/ARQUITECTURA.md):
 cliente-servidor, N-capas, REST versionado (`/api/v1`), MVC adaptado a API,
 **Repository**, **Singleton** y **Factory**, con **Sequelize** como capa ORM.
 

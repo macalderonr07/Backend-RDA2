@@ -29,6 +29,10 @@ class ConexionDB {
                 pool: { min: 1, max: config.oracle.poolMax, idle: 10000 },
                 logging: false,
                 define: { schema: config.oracle.schema, timestamps: false, freezeTableName: true },
+                // cada conexion nueva trabaja en hora de Ecuador (LOCALTIMESTAMP de los DEFAULT)
+                hooks: {
+                    afterConnect: (conexion) => conexion.execute(`ALTER SESSION SET TIME_ZONE = '${config.zonaHoraria}'`),
+                },
             });
         }
         return ConexionDB.#instancia;

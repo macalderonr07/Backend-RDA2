@@ -27,10 +27,10 @@ class ConexionDB {
             connectString,
             poolMin,
             poolMax,
-            // Cada sesion nueva trabaja sobre el esquema ECOMMERCE: los modelos
-            // escriben "carrito", no "ecommerce.carrito" (lo que sugiere la base).
+            // Cada sesion nueva trabaja sobre el esquema ECOMMERCE (los modelos
+            // escriben "carrito", no "ecommerce.carrito") y en hora de Ecuador.
             sessionCallback: (conexion, _etiqueta, listo) => {
-                conexion.execute(`ALTER SESSION SET CURRENT_SCHEMA = ${schema}`).then(() => listo(), listo);
+                conexion.execute(`ALTER SESSION SET CURRENT_SCHEMA = ${schema} TIME_ZONE = '${config.zonaHoraria}'`).then(() => listo(), listo);
             },
         });
         return this.#pool;

@@ -9,6 +9,12 @@ import { fileURLToPath } from "node:url";
 const raiz = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 dotenv.config({ path: resolve(raiz, ".env"), quiet: true });
 
+// Zona horaria del negocio (Ecuador). Se fija en el proceso Node (fechas que
+// lee el driver) y en cada sesion de Oracle (LOCALTIMESTAMP de los DEFAULT y
+// funciones): asi da igual si el servidor o el contenedor corren en UTC.
+const ZONA_HORARIA = /^[A-Za-z_]+\/[A-Za-z_]+$|^[+-]\d{2}:\d{2}$/.test(process.env.ZONA_HORARIA ?? "") ? process.env.ZONA_HORARIA : "America/Guayaquil";
+process.env.TZ = ZONA_HORARIA;
+
 const OBLIGATORIAS = ["ORACLE_USER", "ORACLE_PASSWORD", "ORACLE_CONNECT_STRING", "JWT_SECRETO"];
 const faltantes = OBLIGATORIAS.filter((nombre) => !process.env[nombre]);
 if (faltantes.length > 0) {
@@ -25,6 +31,7 @@ const entero = (valor, porDefecto) => {
 
 export const config = Object.freeze({
     port: entero(process.env.PORT, 5070),
+    zonaHoraria: ZONA_HORARIA,
     clientOrigin: process.env.CLIENT_ORIGIN ?? "",
     oracle: Object.freeze({
         user: process.env.ORACLE_USER,

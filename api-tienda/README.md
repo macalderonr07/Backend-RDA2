@@ -1,7 +1,7 @@
 # Servidor Comercial Elite (API e-commerce sobre Oracle)
 
 API REST del e-commerce de Comercial Elite. Sigue la arquitectura de
-[`Mi_servidor/api-productos/ARQUITECTURA.md`](../../Mi_servidor/api-productos/ARQUITECTURA.md):
+[`docs/ARQUITECTURA.md`](../docs/ARQUITECTURA.md):
 cliente-servidor, N-capas, REST, MVC adaptado a API, Repository, Singleton y Factory.
 Consume la base **Comercial Elite v5** (Oracle) y la usa el frontend
 `negocio tailwind/comercial-elite`.

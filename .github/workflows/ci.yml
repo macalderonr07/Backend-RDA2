@@ -140,6 +140,7 @@ jobs:
         image: gvenzl/oracle-free:slim-faststart
         env:
           ORACLE_RANDOM_PASSWORD: "true"
+          TZ: America/Guayaquil
         ports:
           - 1521:1521
         options: >-
