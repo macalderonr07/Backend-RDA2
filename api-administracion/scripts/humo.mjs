@@ -191,13 +191,19 @@ ok(r.status === 409, "recibir más de lo pedido lo rechaza la base -> 409", r.js
         const ocF = r.data;
         await pedir(`/compras/ordenes/${ocF?.idOrdenCompra}/estado`, { metodo: "POST", cuerpo: { estado: "EMITIDA" } });
         const det = ocF?.lineas[0].id_detalle_orden_compra;
+        // Sin codigo de lote: la base lo genera (OC<orden>-<n>) y sigue la
+        // numeracion en una segunda recepcion parcial de la misma orden.
+        const r1 = await pedir(`/compras/ordenes/${ocF?.idOrdenCompra}/recepciones`, { metodo: "POST", cuerpo: { lineas: [
+            { idDetalleOrdenCompra: det, cantidad: 24 },
+        ] } });
         r = await pedir(`/compras/ordenes/${ocF?.idOrdenCompra}/recepciones`, { metodo: "POST", cuerpo: { lineas: [
-            { idDetalleOrdenCompra: det, cantidad: 24, codigoLote: `PL-${unico}-1` },
-            { idDetalleOrdenCompra: det, cantidad: 24, codigoLote: `PL-${unico}-2` },
+            { idDetalleOrdenCompra: det, cantidad: 24 },
         ] } });
         const lotes = (await pedir(`/inventario/variantes/${varFibra.idVariante}/lotes`)).data ?? [];
-        const nuevas = lotes.filter((l) => String(l.lot_codigo_proveedor ?? l.codigo ?? "").startsWith(`PL-${unico}`));
-        ok(r.status === 201 && nuevas.length === 2, "recepción de 2 planchas = 2 lotes (piezas) de 24 pie²", { status: r.status, lotes: nuevas });
+        const prefijo = `OC${ocF?.idOrdenCompra}-`;
+        const nuevas = lotes.map((l) => String(l.codigo ?? "")).filter((c) => c.startsWith(prefijo)).sort();
+        ok(r1.status === 201 && r.status === 201 && nuevas.join(",") === `${prefijo}1,${prefijo}2`,
+            `2 recepciones parciales de 1 plancha = 2 lotes con código generado (${nuevas.join(", ")})`, { lotes: nuevas });
     }
 }
 
