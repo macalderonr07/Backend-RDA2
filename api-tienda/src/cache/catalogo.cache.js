@@ -185,6 +185,15 @@ export async function estadoCache() {
     try {
         const [marca, ultima] = await conLimite(redis().mGet([CLAVES.listo, CLAVES.ultimaSincronia]));
         if (marca !== "1") return { estado: "cargando (se responde desde Oracle)" };
+        // La reconstruccion completa corre cada CACHE_RECONCILIAR_MIN: sin ninguna
+        // sincronia en el doble de ese tiempo, el worker esta fallando (ver logs).
+        const minutos = ultima ? Math.floor((Date.now() - Number(ultima)) / 60000) : null;
+        if (minutos !== null && minutos > 2 * config.redis.reconciliarCadaMin) {
+            return {
+                estado: `desactualizada: sin sincronizar hace ${minutos} min (revisar los logs de la API)`,
+                ultimaSincronia: new Date(Number(ultima)).toISOString(),
+            };
+        }
         return {
             estado: "ok",
             ultimaSincronia: ultima ? new Date(Number(ultima)).toISOString() : null,

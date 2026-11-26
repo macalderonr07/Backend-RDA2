@@ -62,8 +62,8 @@ export const porFacturar = accion(async (_req, res) => {
 
 export const productos = async (req, res, next) => {
     try {
-        const { q = null } = matchedData(req, { locations: ["query"] });
-        res.status(200).json(RespuestaFactory.exito(await repo.productosCompra(q)));
+        const { q = null, idProveedor = null } = matchedData(req, { locations: ["query"] });
+        res.status(200).json(RespuestaFactory.exito(await repo.productosCompra(q, idProveedor ?? null)));
     } catch (err) {
         next(err);
     }

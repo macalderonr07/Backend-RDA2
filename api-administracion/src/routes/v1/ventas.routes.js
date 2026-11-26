@@ -11,6 +11,7 @@
 import { Router } from "express";
 import { body, query } from "express-validator";
 import * as c from "../../controllers/ventas.controller.js";
+import * as cot from "../../controllers/cotizaciones.controller.js";
 import { autenticar, exigirPermiso } from "../../middlewares/autenticacion.js";
 import { paginacion, reglasPaginacion } from "../../middlewares/paginacion.js";
 import { manejarValidacion } from "../../middlewares/validacion.js";
@@ -24,6 +25,8 @@ router.get(
     "/pedidos",
     reglasPaginacion,
     query("estado").optional().isIn(["PEN", "PAG", "FAC", "DES", "ENT", "CAN"]),
+    // Pedidos (en curso o cancelados) y Ventas (facturadas o entregadas) se ven aparte
+    query("grupo").optional().isIn(["pedidos", "ventas"]),
     query("canal").optional().isIn(["TDA", "WEB", "WSP"]),
     query("q").optional().isString().trim().isLength({ max: 80 }),
     manejarValidacion,
@@ -75,6 +78,10 @@ const reglasDireccion = (p, objeto = null) => [
     body(`${p}callePrincipal`).if(vino(objeto)).exists({ values: "falsy" }).withMessage("Calle principal es obligatorio").bail()
         .isString().trim().isLength({ max: 120 }).withMessage("Calle principal: hasta 120 caracteres")
         .matches(regex("nombre")).withMessage(`Calle principal: ${PATRONES.nombre.mensaje}`),
+    // toda direccion pertenece a un sector de su ciudad (se crea si no existe)
+    body(`${p}sector`).if(vino(objeto)).exists({ values: "falsy" }).withMessage("Sector es obligatorio").bail()
+        .isString().trim().isLength({ min: 2, max: 80 }).withMessage("Sector: de 2 a 80 caracteres")
+        .matches(regex("nombre")).withMessage(`Sector: ${PATRONES.nombre.mensaje}`),
     texto(`${p}numero`, "codigo", { etiqueta: "Número", opcional: true, max: 15 }),
     texto(`${p}calleSecundaria`, "nombre", { etiqueta: "Calle secundaria", opcional: true, max: 120 }),
     texto(`${p}referencia`, "texto", { etiqueta: "Referencia", opcional: true, max: 200 }),
@@ -95,8 +102,12 @@ const reglasFacturacion = (p, objeto = null) => {
         body(`${p}razonSocial`).if(conIdentificacion).isString().withMessage("Escribe la razón social").trim()
             .isLength({ min: 2, max: 150 }).withMessage("Razón social: de 2 a 150 caracteres").matches(/^[^<>]+$/u).withMessage("Razón social: sin < ni >"),
         texto(`${p}correo`, "correo", { etiqueta: "Correo para la factura", opcional: true, max: 120, minusculas: true }),
+        // sector obligatorio (la direccion no): ciudad + nombre, o el de la direccion elegida
+        body(`${p}idCiudad`).if(conIdentificacion).optional({ values: "falsy" }).isInt({ min: 1 }).withMessage("Elige la ciudad").toInt(),
+        texto(`${p}sector`, "nombre", { etiqueta: "Sector", opcional: true, max: 80 }),
     ];
 };
+router.get("/sectores", query("idCiudad").isInt({ min: 1 }).withMessage("Elige la ciudad").toInt(), manejarValidacion, c.sectores);
 router.get("/clientes", query("q").optional().isString().trim().isLength({ max: 60 }), manejarValidacion, c.buscarClientes);
 router.get("/clientes/:id", idParam(), manejarValidacion, c.fichaCliente);
 router.get("/clientes/:id/deudas", idParam(), manejarValidacion, c.deudasCliente);
@@ -117,6 +128,20 @@ router.post(
 router.post("/clientes/:id/facturacion", exigirPermiso("VENTA_REGISTRAR"), idParam(), ...reglasFacturacion(""),
     body("idDireccion").optional({ values: "falsy" }).isInt({ min: 1 }).toInt(),
     manejarValidacion, c.agregarFacturacion);
+// ---- Cotizaciones de la tienda (ventas por confirmar): no reservan stock; se
+// editan, se confirman como pedido o vencen a los 14 dias
+const registrar = exigirPermiso("VENTA_REGISTRAR");
+router.get("/cotizaciones", query("estado").optional().isIn(["PENDIENTE", "CONFIRMADA"]),
+    query("q").optional().isString().trim().isLength({ max: 60 }), ...reglasPaginacion, manejarValidacion, paginacion, cot.listar);
+router.get("/cotizaciones/:id", idParam(), manejarValidacion, cot.obtener);
+router.patch("/cotizaciones/:id/lineas/:idLinea", registrar, idParam(), idParam("idLinea"),
+    body("cantidad").isFloat({ gt: 0, max: 100000 }).withMessage("Cantidad: mayor que 0").toFloat(), manejarValidacion, cot.cambiarCantidad);
+router.delete("/cotizaciones/:id/lineas/:idLinea", registrar, idParam(), idParam("idLinea"), manejarValidacion, cot.quitarLinea);
+router.post("/cotizaciones/:id/lineas", registrar, idParam(), body("idPresentacion").isInt({ min: 1 }).withMessage("Elige la forma de venta").toInt(),
+    body("cantidad").isFloat({ gt: 0, max: 100000 }).withMessage("Cantidad: mayor que 0").toFloat(), manejarValidacion, cot.agregarLinea);
+router.post("/cotizaciones/:id/confirmar", registrar, idParam(), manejarValidacion, cot.confirmar);
+router.delete("/cotizaciones/:id", registrar, idParam(), manejarValidacion, cot.descartar);
+
 router.post("/clientes/:id/direcciones", exigirPermiso("VENTA_REGISTRAR"), idParam(), ...reglasDireccion(""), manejarValidacion, c.agregarDireccion);
 router.post(
     "/pedidos/:id/pagos",

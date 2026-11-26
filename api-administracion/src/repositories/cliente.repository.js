@@ -3,7 +3,7 @@
 // alta sin salir de la venta (cliente + telefono + datos de facturacion +
 // direccion, todo en UNA transaccion). Las identificaciones viven en
 // datos_facturacion (un cliente puede facturar como persona y como empresa).
-import { conUsuario, consulta, ESQUEMA } from "../config/db.js";
+import { conUsuario, consulta, ESQUEMA, llamar } from "../config/db.js";
 import { m } from "../models/index.js";
 import { AppError } from "../utils/AppError.js";
 
@@ -21,13 +21,22 @@ export async function ficha(idCliente, transaction) {
         m.Telefono.findAll({ where: { idCliente }, transaction }),
         m.DatosFacturacion.findAll({ where: { idCliente, activo: 1 }, order: [["idDatosFacturacion", "ASC"]], transaction }),
         consulta(
-            `SELECT d.id_direccion, d.dir_calle_principal, d.dir_numero, d.dir_calle_secundaria, d.dir_referencia, ci.ciu_nombre AS ciudad
+            `SELECT d.id_direccion, d.dir_calle_principal, d.dir_numero, d.dir_calle_secundaria, d.dir_referencia, ci.ciu_nombre AS ciudad,
+                    d.id_sector, se.sec_nombre AS sector
              FROM ${ESQUEMA}.direccion d JOIN ${ESQUEMA}.ciudad ci ON ci.id_ciudad = d.id_ciudad
+             LEFT JOIN ${ESQUEMA}.sector se ON se.id_sector = d.id_sector
              WHERE d.id_cliente = :c AND d.dir_activa = 1 ORDER BY d.id_direccion DESC`,
             { c: idCliente },
             transaction
         ),
     ]);
+    const idsSector = [...new Set(facturacion.map((d) => d.idSector).filter(Boolean))];
+    const sectores = new Map(idsSector.length
+        ? (await consulta(`SELECT se.id_sector, se.sec_nombre || ', ' || ci.ciu_nombre AS nombre FROM ${ESQUEMA}.sector se
+                           JOIN ${ESQUEMA}.ciudad ci ON ci.id_ciudad = se.id_ciudad
+                           WHERE se.id_sector IN (${idsSector.map((_, i) => `:s${i}`).join(",")})`,
+            Object.fromEntries(idsSector.map((s, i) => [`s${i}`, s])), transaction)).map((f) => [f.id_sector, f.nombre])
+        : []);
     return {
         idCliente: c.idCliente,
         nombre: [c.nombres, c.apellidos].filter(Boolean).join(" "),
@@ -41,11 +50,13 @@ export async function ficha(idCliente, transaction) {
             razonSocial: d.razonSocial,
             correo: d.correo,
             idDireccion: d.idDireccion,
-            etiqueta: d.idTipoIdentificacion === "07" ? "Consumidor final" : `${d.razonSocial} (${d.identificacion})`,
+            sector: sectores.get(d.idSector) ?? null,
+            etiqueta: d.idTipoIdentificacion === "07" ? "Consumidor final" : `${d.razonSocial} (${d.identificacion})${sectores.get(d.idSector) ? ` · ${sectores.get(d.idSector)}` : ""}`,
         })),
         direcciones: direcciones.map((d) => ({
             id: d.id_direccion,
-            etiqueta: [[d.dir_calle_principal, d.dir_numero].filter(Boolean).join(" "), d.dir_calle_secundaria ? `y ${d.dir_calle_secundaria}` : null, d.ciudad]
+            idSector: d.id_sector,
+            etiqueta: [[d.dir_calle_principal, d.dir_numero].filter(Boolean).join(" "), d.dir_calle_secundaria ? `y ${d.dir_calle_secundaria}` : null, d.sector, d.ciudad]
                 .filter(Boolean).join(", ") + (d.dir_referencia ? ` (${d.dir_referencia})` : ""),
         })),
     };
@@ -87,7 +98,16 @@ async function crearFacturacion(t, idCliente, d) {
         where: { idCliente, identificacion: datos.identificacion, activo: 1 },
         transaction: t,
     });
-    if (existente) return existente.idDatosFacturacion;
+    // sector obligatorio (la direccion no): el indicado o el de la direccion elegida
+    let idSector = d.consumidorFinal ? null : await resolverSector(t, d);
+    if (!idSector && d.idDireccion && !d.consumidorFinal) idSector = (await m.Direccion.findByPk(d.idDireccion, { transaction: t }))?.idSector ?? null;
+    if (!idSector && !d.consumidorFinal) {
+        throw new AppError("Indica el sector de los datos de facturación", 422, [{ campo: "sector", mensaje: "Sector es obligatorio" }]);
+    }
+    if (existente) {
+        if (!existente.idSector && idSector) await existente.update({ idSector }, { transaction: t });
+        return existente.idDatosFacturacion;
+    }
     const fila = await m.DatosFacturacion.create(
         {
             idCliente,
@@ -96,16 +116,31 @@ async function crearFacturacion(t, idCliente, d) {
             razonSocial: datos.razonSocial,
             correo: datos.correo ?? null,
             idDireccion: d.idDireccion ?? null,
+            idSector,
         },
         { transaction: t }
     );
     return fila.idDatosFacturacion;
 }
 
+/**
+ * Sector de una direccion o de unos datos de facturacion: el id, o ciudad +
+ * nombre (fn_sector lo busca sin distinguir mayusculas/tildes y lo crea si no
+ * existe). null si no se indico.
+ */
+async function resolverSector(t, { idSector, idCiudad, sector }) {
+    if (idSector) return Number(idSector);
+    if (!idCiudad || !String(sector ?? "").trim()) return null;
+    return llamar(t, "fn_sector", { p_ciudad: Number(idCiudad), p_nombre: String(sector).trim() });
+}
+
 async function crearDireccion(t, idCliente, d) {
+    const idSector = await resolverSector(t, d);
+    if (!idSector) throw new AppError("La dirección necesita su sector", 422, [{ campo: "sector", mensaje: "Sector es obligatorio" }]);
     const fila = await m.Direccion.create(
         {
             idCliente,
+            idSector,
             idCiudad: d.idCiudad,
             callePrincipal: d.callePrincipal,
             numero: d.numero ?? null,
@@ -179,4 +214,12 @@ export async function deudas(idCliente) {
         { c: idCliente }
     );
     return { resumen: resumen ?? { deuda_total: 0, cuentas_pendientes: 0 }, cuentas, movimientos };
+}
+
+/** Sectores activos de una ciudad, por nombre. */
+export function sectores(idCiudad) {
+    return consulta(
+        `SELECT id_sector AS id, sec_nombre AS nombre FROM ${ESQUEMA}.sector WHERE id_ciudad = :c AND sec_activo = 1 ORDER BY sec_nombre`,
+        { c: idCiudad }
+    );
 }

@@ -36,7 +36,11 @@ export async function detalleOrden(idOrdenCompra) {
         `SELECT d.id_detalle_orden_compra, d.id_variante, d.var_sku, p.prd_nombre, p.id_unidad_medida AS unidad,
                 p.prd_venta_por_pieza AS por_pieza, p.prd_cortes_estandar AS cortes_estandar,
                 p.prd_compra_descripcion AS compra_descripcion, p.prd_compra_factor AS compra_factor,
-                d.cantidad_pedida, d.costo_pactado, d.cantidad_recibida, d.cantidad_pendiente
+                d.cantidad_pedida, d.costo_pactado, d.cantidad_recibida, d.cantidad_pendiente,
+                -- paso del selector al recibir en la unidad del inventario: enteros si
+                -- todas sus formas de venta son enteras; si no, cualquier decimal
+                CASE WHEN (SELECT NVL(MAX(MOD(pr.pre_incremento, 1) + MOD(pr.pre_factor, 1)), 0) FROM ${ESQUEMA}.presentacion pr
+                           WHERE pr.id_variante = d.id_variante AND pr.pre_activa = 1) = 0 THEN 1 ELSE 0.01 END AS paso
          FROM ${ESQUEMA}.v_orden_compra_detalle d
          JOIN ${ESQUEMA}.variante v ON v.id_variante = d.id_variante
          JOIN ${ESQUEMA}.producto p ON p.id_producto = v.id_producto
@@ -169,10 +173,16 @@ export function recepcionesPorFacturar() {
 
 // ------------------------------------------------------------------ Productos para la orden de compra
 /** Paso 1: productos (uno por fila, publicados o no) con cuanto hay que reponer. */
-export function productosCompra(q) {
+/**
+ * Productos para la orden de compra. Con idProveedor, primero los de ese
+ * proveedor (del_proveedor = 1) y despues los demas.
+ */
+export function productosCompra(q, idProveedor = null) {
     return consulta(
         `SELECT p.id_producto, p.prd_codigo, p.prd_nombre, c.cat_nombre AS categoria, p.prd_imagen_url AS imagen_url, p.id_unidad_medida AS unidad,
                 p.prd_compra_descripcion AS compra_descripcion,
+                CASE WHEN EXISTS (SELECT 1 FROM ${ESQUEMA}.producto_proveedor pp WHERE pp.id_producto = p.id_producto AND pp.id_proveedor = :prov)
+                     THEN 1 ELSE 0 END AS del_proveedor,
                 COUNT(*) AS variantes, SUM(s.requiere_compra) AS a_reponer
          FROM ${ESQUEMA}.producto p
          JOIN ${ESQUEMA}.categoria c ON c.id_categoria = p.id_categoria
@@ -180,9 +190,9 @@ export function productosCompra(q) {
          JOIN ${ESQUEMA}.v_stock_variante s ON s.id_variante = v.id_variante
          WHERE (:q IS NULL OR INSTR(LOWER(p.prd_nombre || ' ' || p.prd_codigo || ' ' || c.cat_nombre), :q) > 0)
          GROUP BY p.id_producto, p.prd_codigo, p.prd_nombre, c.cat_nombre, p.prd_imagen_url, p.id_unidad_medida, p.prd_compra_descripcion
-         ORDER BY SUM(s.requiere_compra) DESC, p.prd_nombre
+         ORDER BY del_proveedor DESC, SUM(s.requiere_compra) DESC, p.prd_nombre
          FETCH FIRST 30 ROWS ONLY`,
-        { q: q ? q.toLowerCase() : null }
+        { q: q ? q.toLowerCase() : null, prov: idProveedor ?? null }
     );
 }
 

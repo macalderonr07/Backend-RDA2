@@ -48,6 +48,25 @@ export const RECURSOS = [
             { nombre: "nombre", etiqueta: "Nombre", tipo: "texto", patron: "nombre", max: 60, requerido: true },
         ],
     },
+    {
+        ruta: "sectores",
+        titulo: "Sectores",
+        singular: "sector",
+        grupo: "Catálogos generales",
+        modelo: m.Sector,
+        pk: "idSector",
+        etiqueta: (f) => f.nombre,
+        orden: [["nombre", "ASC"]],
+        buscar: ["nombre"],
+        filtros: ["idCiudad"],
+        permiso: "VENTA_REGISTRAR",
+        ayuda: "Barrios de cada ciudad. El sector es obligatorio en los datos de facturación y en toda dirección; también se crea solo al registrar un cliente.",
+        campos: [
+            { nombre: "idCiudad", etiqueta: "Ciudad", tipo: "seleccion", recurso: "ciudades", requerido: true },
+            { nombre: "nombre", etiqueta: "Nombre", tipo: "texto", patron: "nombre", max: 80, requerido: true },
+            { nombre: "activo", etiqueta: "Activo", tipo: SI_NO },
+        ],
+    },
     // ------------------------------------------------------------ Catalogos del negocio
     {
         ruta: "unidades-medida",
@@ -360,6 +379,7 @@ export const RECURSOS = [
         campos: [
             { nombre: "idCliente", etiqueta: "Cliente", tipo: "seleccion", recurso: "clientes" },
             { nombre: "idCiudad", etiqueta: "Ciudad", tipo: "seleccion", recurso: "ciudades", requerido: true },
+            { nombre: "idSector", etiqueta: "Sector", tipo: "seleccion", recurso: "sectores", requerido: true, ayuda: "Debe ser de la misma ciudad" },
             { nombre: "callePrincipal", etiqueta: "Calle principal", tipo: "texto", patron: "nombre", max: 120, requerido: true },
             { nombre: "numero", etiqueta: "Número", tipo: "texto", patron: "codigo", max: 15 },
             { nombre: "calleSecundaria", etiqueta: "Calle secundaria", tipo: "texto", patron: "nombre", max: 120 },
@@ -386,7 +406,8 @@ export const RECURSOS = [
             { nombre: "identificacion", etiqueta: "Identificación", tipo: "identificacion", campoTipo: "idTipoIdentificacion", max: 20, requerido: true },
             { nombre: "razonSocial", etiqueta: "Razón social", tipo: "texto", patron: "nombre", max: 150, requerido: true },
             { nombre: "correo", etiqueta: "Correo para la factura", tipo: "correo", max: 120 },
-            { nombre: "idDireccion", etiqueta: "Dirección", tipo: "seleccion", recurso: "direcciones" },
+            { nombre: "idSector", etiqueta: "Sector", tipo: "seleccion", recurso: "sectores", requerido: true, ayuda: "Obligatorio (la dirección no)" },
+            { nombre: "idDireccion", etiqueta: "Dirección (opcional)", tipo: "seleccion", recurso: "direcciones" },
             { nombre: "activo", etiqueta: "Activo", tipo: SI_NO },
         ],
     },

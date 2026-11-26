@@ -54,7 +54,7 @@ export async function estadoPresentaciones(ids) {
 
 export async function buscarCarrito(token) {
     const { rows: cabecera } = await db.ejecutar(
-        `SELECT id_carrito, car_token, car_creado, car_actualizado, id_pedido, id_cliente
+        `SELECT id_carrito, car_token, car_creado, car_actualizado, id_pedido, id_cotizacion, id_cliente
          FROM carrito WHERE car_token = :token`,
         { token }
     );
@@ -124,6 +124,7 @@ export async function buscarCarrito(token) {
         creado: carrito.CAR_CREADO,
         actualizado: carrito.CAR_ACTUALIZADO,
         idPedido: carrito.ID_PEDIDO,
+        idCotizacion: carrito.ID_COTIZACION ?? null,
         // Solo el hecho, nunca el id: el id_cliente es interno de la base
         clienteIdentificado: carrito.ID_CLIENTE != null,
         items,
@@ -239,12 +240,12 @@ export async function eliminarItem(token, idPresentacion, pieza = 0) {
 export async function eliminarCarrito(token) {
     return db.transaccion(async (conexion) => {
         const { rows } = await conexion.execute(
-            `SELECT id_carrito, id_pedido FROM carrito WHERE car_token = :token FOR UPDATE`,
+            `SELECT id_carrito, id_pedido, id_cotizacion FROM carrito WHERE car_token = :token FOR UPDATE`,
             { token }
         );
         if (rows.length === 0) return "NO_EXISTE";
         // Un carrito convertido es la traza del pedido web: no se borra
-        if (rows[0].ID_PEDIDO != null) return "CONVERTIDO";
+        if (rows[0].ID_PEDIDO != null || rows[0].ID_COTIZACION != null) return "CONVERTIDO";
         const id = rows[0].ID_CARRITO;
         await conexion.execute(`DELETE FROM item_carrito WHERE id_carrito = :id`, { id });
         await conexion.execute(`DELETE FROM carrito WHERE id_carrito = :id`, { id });

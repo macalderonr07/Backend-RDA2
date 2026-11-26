@@ -112,21 +112,20 @@ const disponibleDe = async () =>
 const disponibleAntes = await disponibleDe();
 
 r = await pedir(`/carritos/${token}/pedido`, { metodo: "POST", cuerpo: { observacion: "Prueba de humo" } });
-ok(r.status === 201 && r.json.data.idPedido > 0 && r.json.data.estado === "PEN",
-    "POST pedido crea el pedido WEB pendiente", JSON.stringify(r.json));
-const idPedido = r.json?.data?.idPedido;
+// La tienda envia una COTIZACION (venta por confirmar): no crea pedido ni
+// reserva stock; el personal la confirma en la administracion o vence en 14 dias.
+const diasHasta = (fecha) => (new Date(fecha) - Date.now()) / 86400000;
+ok(r.status === 201 && r.json.data.idCotizacion > 0 && /^COT-\d{6}$/.test(r.json.data.numeroCotizacion) && r.json.data.estado === "COT"
+    && r.json.data.idPedido === null && Math.round(diasHasta(r.json.data.vence)) === 14,
+    "POST pedido envía una cotización por confirmar (COT-…, vence en 14 días, sin pedido)", JSON.stringify(r.json));
+const idCotizacion = r.json?.data?.idCotizacion;
 
-// ---- Cache: el pedido reserva stock en Oracle y Redis lo refleja solo ----
-const salud = (await pedir("/salud")).json.data.cache;
-if (salud.estado === "ok" && !productoDe.porPieza) {
-    const { valor: disponibleDespues, ms } = await esperarCambio(disponibleDe, disponibleAntes);
-    ok(disponibleDespues < disponibleAntes, `la cache refleja la reserva del pedido (${disponibleAntes} -> ${disponibleDespues} en ${ms} ms)`);
-} else {
-    console.log(`  (cache: ${salud.estado} — se omite la prueba de sincronia)`);
-}
+// ---- La cotizacion NO reserva stock: el disponible sigue igual ----
+await new Promise((listo) => setTimeout(listo, 600));
+ok((await disponibleDe()) === disponibleAntes, `la cotización no reserva stock (disponible ${disponibleAntes} sin cambios)`);
 
 r = await pedir(`/carritos/${token}/pedido`);
-ok(r.status === 200 && r.json.data.idPedido === idPedido, "GET pedido devuelve estado y total");
+ok(r.status === 200 && r.json.data.idCotizacion === idCotizacion && r.json.data.estadoNombre === "Cotización por confirmar", "GET pedido devuelve la cotización y su estado");
 
 r = await pedir(`/carritos/${token}/items`, {
     metodo: "POST",
@@ -256,13 +255,12 @@ if (enteros) {
                 cuerpo: { nombres: "Prueba Fibra", correo: `fibra.${unico}@example.com`, telefono: "0999999999" },
             });
             r = await pedir(`/carritos/${tk}/pedido`, { metodo: "POST", cuerpo: { observacion: "Humo: cortes de fibra" } });
-            ok(r.status === 201 && r.json.data.estado === "PEN", "pedido de 2 x 2 pies + 1 pie: la base corta la plancha", JSON.stringify(r.json));
-            const { valor: despues } = await esperarCambio(
-                async () => (await pedir(`/productos/${fibra.codigo}`)).json.data.presentaciones
-                    .find((x) => x.idPresentacion === corte(1).idPresentacion).disponible,
-                antes
-            );
-            ok(despues === antes - 5, `quedan reservados exactamente 5 pie2 (${antes} -> ${despues}): cortar no pierde fibra`);
+            ok(r.status === 201 && r.json.data.estado === "COT", "cotización de 2 x 2 pies + 1 pie de fibra enviada", JSON.stringify(r.json));
+            // el corte de la plancha recien ocurre al confirmar (en la administracion)
+            await new Promise((listo) => setTimeout(listo, 600));
+            const despues = (await pedir(`/productos/${fibra.codigo}`)).json.data.presentaciones
+                .find((x) => x.idPresentacion === corte(1).idPresentacion).disponible;
+            ok(despues === antes, `la cotización no corta ni reserva la plancha (${antes} pie2 sin cambios)`);
         }
     }
 }

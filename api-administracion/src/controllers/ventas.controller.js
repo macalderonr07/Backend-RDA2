@@ -16,8 +16,8 @@ const datos = (req) => matchedData(req, { locations: ["body"] });
 const noExiste = (id) => new AppError(`No existe el pedido ${id}`, 404);
 
 export const listar = accion(async (req, res) => {
-    const { estado = null, canal = null, q = null } = matchedData(req, { locations: ["query"] });
-    const { filas, total } = await repo.listarPedidos({ estado, canal, q, ...req.paginacion });
+    const { estado = null, canal = null, q = null, grupo = null } = matchedData(req, { locations: ["query"] });
+    const { filas, total } = await repo.listarPedidos({ estado, canal, q, grupo, ...req.paginacion });
     res.status(200).json(RespuestaFactory.exito(filas, RespuestaFactory.paginacion(req.paginacion, total)));
 });
 
@@ -78,6 +78,12 @@ export const abonar = accion(async (req, res) => {
 });
 
 // ------------------------------------------------------------------ Clientes de la venta
+/** Sectores activos de una ciudad (sugerencias al escribir el sector). */
+export const sectores = accion(async (req, res) => {
+    const { idCiudad } = matchedData(req, { locations: ["query"] });
+    res.status(200).json(RespuestaFactory.exito(await clientes.sectores(idCiudad)));
+});
+
 export const buscarClientes = accion(async (req, res) => {
     const { q = "" } = matchedData(req, { locations: ["query"] });
     res.status(200).json(RespuestaFactory.exito(await clientes.buscar(q)));

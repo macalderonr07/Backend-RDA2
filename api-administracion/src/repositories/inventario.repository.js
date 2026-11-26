@@ -36,6 +36,9 @@ export async function stock({ q = null, requiereCompra = false, idVariante = nul
                 s.en_camino, s.stock_minimo, s.requiere_compra, ROUND(s.valor_inventario, 2) AS valor_inventario,
                 s.antiguedad_maxima_dias, s.ultimo_movimiento,
                 p.prd_compra_descripcion AS compra_descripcion, p.prd_compra_factor AS compra_factor, p.prd_venta_por_pieza AS venta_por_pieza,
+                -- paso del selector de cantidades: enteros si todas sus formas de venta lo son
+                CASE WHEN (SELECT NVL(MAX(MOD(pr.pre_incremento, 1) + MOD(pr.pre_factor, 1)), 0) FROM ${ESQUEMA}.presentacion pr
+                           WHERE pr.id_variante = s.id_variante AND pr.pre_activa = 1) = 0 THEN 1 ELSE 0.01 END AS paso,
                 (SELECT COUNT(*) FROM ${ESQUEMA}.v_lote_saldo ls WHERE ls.id_variante = s.id_variante AND ls.saldo > 0) AS piezas,
                 (SELECT LISTAGG(a.atr_nombre || ': ' || va.val_valor, ', ') WITHIN GROUP (ORDER BY a.atr_nombre)
                  FROM ${ESQUEMA}.variante_valor vv

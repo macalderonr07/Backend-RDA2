@@ -63,7 +63,8 @@ router.post(
     c.recepcionar
 );
 // orden de compra: primero el producto, luego cantidades por variante
-router.get("/productos", gestionar, query("q").optional().isString().trim().isLength({ max: 80 }), manejarValidacion, c.productos);
+router.get("/productos", gestionar, query("q").optional().isString().trim().isLength({ max: 80 }),
+    query("idProveedor").optional({ values: "falsy" }).isInt({ min: 1 }).toInt(), manejarValidacion, c.productos);
 router.get("/productos/:id", gestionar, idParam(), manejarValidacion, c.producto);
 router.get("/comprobantes", reglasPaginacion, manejarValidacion, paginacion, c.comprobantes);
 router.post(

@@ -47,38 +47,64 @@ export async function identificarCliente(token, { nombres, apellidos, correo, te
 }
 
 /**
- * Confirma el carrito: la base crea el pedido WEB (estado PEN) y deja el
- * carrito cerrado con ese pedido. Devuelve el pedido creado o null si el
- * carrito no existe. Las reglas (carrito vacio, sin cliente, ya convertido,
- * stock insuficiente) las hace cumplir la base con ORA-20001 -> 409.
+ * Envia el carrito como COTIZACION (venta por confirmar): no reserva stock; el
+ * personal la revisa, la edita y la confirma como pedido en la administracion,
+ * o vence a los 14 dias. Devuelve la cotizacion o null si el carrito no existe.
+ * Las reglas (vacio, sin cliente, ya enviado) las hace cumplir la base (409).
  */
 export async function confirmarCarrito(token, { observacion = null, sesion = null, ip = null } = {}) {
-    const idPedido = await db.transaccion(async (conexion) => {
+    const idCotizacion = await db.transaccion(async (conexion) => {
         const { rows } = await conexion.execute(`SELECT id_carrito FROM carrito WHERE car_token = :token`, { token });
         if (rows.length === 0) return null;
         const { outBinds } = await conexion.execute(
             `BEGIN
-                 :pedido := ${ESQUEMA}.fn_crear_pedido_desde_carrito(:carrito, :observacion, :sesion, :ip);
+                 :cotizacion := ${ESQUEMA}.fn_crear_cotizacion_desde_carrito(:carrito, :observacion, :sesion, :ip);
              END;`,
             {
-                pedido: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER },
+                cotizacion: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER },
                 carrito: rows[0].ID_CARRITO,
                 observacion,
                 sesion,
                 ip,
             }
         );
-        return outBinds.pedido;
+        return outBinds.cotizacion;
     });
-    return idPedido === null ? null : buscarPedidoDeCarrito(token);
+    return idCotizacion === null ? null : buscarPedidoDeCarrito(token);
 }
 
 /**
- * Pedido en que se convirtio un carrito, con su estado y total actuales
- * (v_pedido_web: "mis pedidos" del nodo e-commerce). El token del carrito es
- * la credencial del visitante para seguir su pedido. null si no hay pedido.
+ * Lo que se envio desde un carrito: su cotizacion (numero, vencimiento) y, si
+ * el personal ya la confirmo, el pedido con su estado y total. El token del
+ * carrito es la credencial del visitante. null si no se envio nada.
  */
 export async function buscarPedidoDeCarrito(token) {
+    const { rows } = await db.ejecutar(
+        `SELECT co.id_cotizacion, co.numero, co.fecha AS fecha_cot, co.vence, co.estado AS estado_cot,
+                p.id_pedido, p.fecha, p.estado, p.estado_nombre, p.total, p.comprobante_venta
+         FROM v_cotizacion_web co
+         LEFT JOIN v_pedido_web p ON p.id_pedido = co.id_pedido
+         WHERE co.car_token = :token`,
+        { token }
+    );
+    if (rows.length === 0) return buscarPedidoAntiguo(token);
+    const f = rows[0];
+    const confirmada = f.ESTADO_COT === "CONFIRMADA" && f.ID_PEDIDO;
+    return {
+        idCotizacion: f.ID_COTIZACION,
+        numeroCotizacion: f.NUMERO,
+        vence: f.VENCE,
+        idPedido: confirmada ? f.ID_PEDIDO : null,
+        fecha: confirmada ? f.FECHA : f.FECHA_COT,
+        estado: confirmada ? f.ESTADO : "COT",
+        estadoNombre: confirmada ? f.ESTADO_NOMBRE : "Cotización por confirmar",
+        total: confirmada ? f.TOTAL : null,
+        comprobanteVenta: confirmada ? f.COMPROBANTE_VENTA : null,
+    };
+}
+
+/** Carritos confirmados antes de las cotizaciones (crearon el pedido directo). */
+async function buscarPedidoAntiguo(token) {
     const { rows } = await db.ejecutar(
         `SELECT p.id_pedido, p.fecha, p.estado, p.estado_nombre, p.total, p.comprobante_venta
          FROM v_pedido_web p

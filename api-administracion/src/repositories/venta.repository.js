@@ -15,9 +15,11 @@ const ORDEN_PEDIDOS = {
     total: "NVL(t.total, 0)", pagado: "NVL(pg.pagado, 0)",
 };
 
-export async function listarPedidos({ estado = null, canal = null, q = null, limit, offset, orden, dir }) {
+export async function listarPedidos({ estado = null, canal = null, q = null, grupo = null, limit, offset, orden, dir }) {
     const filtros = [];
     const binds = {};
+    if (grupo === "pedidos") filtros.push("ea.id_estado_pedido IN ('PEN', 'PAG', 'DES', 'CAN')");
+    if (grupo === "ventas") filtros.push("ea.id_estado_pedido IN ('FAC', 'ENT')");
     if (estado) {
         filtros.push("ea.id_estado_pedido = :estado");
         binds.estado = estado;

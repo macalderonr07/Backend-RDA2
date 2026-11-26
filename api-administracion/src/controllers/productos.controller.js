@@ -28,6 +28,23 @@ export const obtener = accion(async (req, res) => {
     res.status(200).json(RespuestaFactory.exito(p));
 });
 
+export const proveedores = accion(async (req, res) => {
+    res.status(200).json(RespuestaFactory.exito(await repo.proveedoresDe(req.params.id)));
+});
+
+export const agregarProveedor = accion(async (req, res) => {
+    const { idProveedor, codigoProveedor } = matchedData(req, { locations: ["body"] });
+    const lista = await repo.agregarProveedor(req.params.id, { idProveedor, codigoProveedor }, req.usuario.idUsuario);
+    if (!lista) throw noExiste(req.params.id);
+    res.status(201).json(RespuestaFactory.exito(lista));
+});
+
+export const quitarProveedor = accion(async (req, res) => {
+    const lista = await repo.quitarProveedor(req.params.id, req.params.idProveedor, req.usuario.idUsuario);
+    if (!lista) throw new AppError("Ese proveedor no está relacionado con el producto", 404);
+    res.status(200).json(RespuestaFactory.exito(lista));
+});
+
 export const atributosDeCategoria = accion(async (req, res) => {
     const a = await repo.atributosDeCategoria(Number(req.params.id));
     if (!a) throw new AppError(`No existe la categoría ${req.params.id}`, 404);

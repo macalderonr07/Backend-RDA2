@@ -190,6 +190,7 @@ export function definirTablas(sequelize) {
             correo: { type: DataTypes.STRING(120), field: "DFA_CORREO" },
             idDireccion: { type: DataTypes.INTEGER, field: "ID_DIRECCION" },
             activo: { type: DataTypes.INTEGER, field: "DFA_ACTIVO" },
+            idSector: { type: DataTypes.INTEGER, field: "ID_SECTOR" },
         },
         { tableName: "DATOS_FACTURACION" }
     );
@@ -275,6 +276,7 @@ export function definirTablas(sequelize) {
             calleSecundaria: { type: DataTypes.STRING(120), field: "DIR_CALLE_SECUNDARIA" },
             referencia: { type: DataTypes.STRING(200), field: "DIR_REFERENCIA" },
             activa: { type: DataTypes.INTEGER, field: "DIR_ACTIVA" },
+            idSector: { type: DataTypes.INTEGER, field: "ID_SECTOR" },
         },
         { tableName: "DIRECCION" }
     );
@@ -598,6 +600,17 @@ export function definirTablas(sequelize) {
         { tableName: "PRODUCTO" }
     );
 
+    m.ProductoProveedor = sequelize.define(
+        "ProductoProveedor",
+        {
+            idProducto: { type: DataTypes.INTEGER, field: "ID_PRODUCTO", primaryKey: true, allowNull: false },
+            idProveedor: { type: DataTypes.INTEGER, field: "ID_PROVEEDOR", primaryKey: true, allowNull: false },
+            codigoProveedor: { type: DataTypes.STRING(40), field: "PPV_CODIGO_PROVEEDOR" },
+            fechaRegistro: { type: DataTypes.DATE, field: "PPV_FECHA_REGISTRO" },
+        },
+        { tableName: "PRODUCTO_PROVEEDOR" }
+    );
+
     m.Proveedor = sequelize.define(
         "Proveedor",
         {
@@ -665,6 +678,17 @@ export function definirTablas(sequelize) {
             idPermiso: { type: DataTypes.INTEGER, field: "ID_PERMISO", primaryKey: true, allowNull: false },
         },
         { tableName: "ROL_PERMISO" }
+    );
+
+    m.Sector = sequelize.define(
+        "Sector",
+        {
+            idSector: { type: DataTypes.INTEGER, field: "ID_SECTOR", primaryKey: true, autoIncrement: true },
+            idCiudad: { type: DataTypes.INTEGER, field: "ID_CIUDAD", allowNull: false },
+            nombre: { type: DataTypes.STRING(80), field: "SEC_NOMBRE", allowNull: false },
+            activo: { type: DataTypes.INTEGER, field: "SEC_ACTIVO" },
+        },
+        { tableName: "SECTOR" }
     );
 
     m.TarifaIva = sequelize.define(

@@ -6,7 +6,7 @@
 // Los precios se registran SIEMPRE con fn_registrar_precio (historial
 // inmutable, permiso PRECIO_GESTIONAR); las ofertas con fn_registrar_oferta.
 import { Op, literal } from "sequelize";
-import { conUsuario, consulta, llamar, procedimiento } from "../config/db.js";
+import { conUsuario, consulta, ESQUEMA, llamar, procedimiento } from "../config/db.js";
 import { m } from "../models/index.js";
 import { AppError } from "../utils/AppError.js";
 import { codigoCombo, codigoProducto } from "../utils/codigos.js";
@@ -249,6 +249,7 @@ export async function detalle(idProducto) {
             })),
         })),
         ofertas,
+        proveedores: await proveedoresDe(idProducto),
         descuentosVolumen: descuentos.map((d) => ({
             idDescuentoVolumen: d.idDescuentoVolumen,
             cantidadMinima: d.cantidadMinima,
@@ -289,6 +290,8 @@ export function crear(datos, idUsuario) {
             },
             { transaction: t }
         );
+        // un producto se relaciona con al menos un proveedor (puede tener varios)
+        for (const idProveedor of [...new Set(datos.idsProveedores ?? [])]) await vincularProveedor(t, producto.idProducto, idProveedor);
         await vincularAtributos(t, producto.idCategoria, datos.variantes ?? []);
         const presentaciones = [];
         for (const x of datos.presentaciones) {
@@ -586,5 +589,48 @@ export function eliminarCombo(idCombo, idUsuario) {
     return conUsuario(idUsuario, async (transaction) => {
         await m.ComboComponente.destroy({ where: { idCombo }, transaction });
         return (await m.Combo.destroy({ where: { idCombo }, transaction })) > 0;
+    });
+}
+
+// ------------------------------------------------------------------ Proveedores del producto
+/** Proveedores de un producto (un producto puede tener varios). */
+export async function proveedoresDe(idProducto, transaction) {
+    const filas = await consulta(
+        `SELECT pv.id_proveedor, NVL(pv.prv_nombre_comercial, pv.prv_razon_social) AS nombre,
+                pv.prv_razon_social, pp.ppv_codigo_proveedor, pv.prv_activo
+         FROM ${ESQUEMA}.producto_proveedor pp
+         JOIN ${ESQUEMA}.proveedor pv ON pv.id_proveedor = pp.id_proveedor
+         WHERE pp.id_producto = :p ORDER BY nombre`,
+        { p: idProducto },
+        transaction
+    );
+    return filas.map((f) => ({ idProveedor: f.id_proveedor, nombre: f.nombre, razonSocial: f.prv_razon_social, codigoProveedor: f.ppv_codigo_proveedor, activo: f.prv_activo === 1 }));
+}
+
+async function vincularProveedor(t, idProducto, idProveedor, codigoProveedor = null) {
+    const existe = await m.ProductoProveedor.findOne({ where: { idProducto, idProveedor }, transaction: t });
+    if (existe) {
+        if (codigoProveedor !== undefined) await existe.update({ codigoProveedor: codigoProveedor || null }, { transaction: t });
+        return;
+    }
+    await m.ProductoProveedor.create({ idProducto, idProveedor, codigoProveedor: codigoProveedor || null }, { transaction: t });
+}
+
+export function agregarProveedor(idProducto, { idProveedor, codigoProveedor }, idUsuario) {
+    return conUsuario(idUsuario, async (t) => {
+        if (!(await m.Producto.findByPk(idProducto, { transaction: t }))) return null;
+        await vincularProveedor(t, idProducto, idProveedor, codigoProveedor);
+        return proveedoresDe(idProducto, t);
+    });
+}
+
+/** Quita un proveedor; el producto debe quedar con al menos uno. */
+export function quitarProveedor(idProducto, idProveedor, idUsuario) {
+    return conUsuario(idUsuario, async (t) => {
+        const total = await m.ProductoProveedor.count({ where: { idProducto }, transaction: t });
+        if (total <= 1) throw new AppError("El producto debe tener al menos un proveedor: agrega otro antes de quitar este", 409);
+        const n = await m.ProductoProveedor.destroy({ where: { idProducto, idProveedor }, transaction: t });
+        if (!n) return null;
+        return proveedoresDe(idProducto, t);
     });
 }

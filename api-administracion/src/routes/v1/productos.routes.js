@@ -79,9 +79,16 @@ router.post(
     numero("variantes.*.stockMinimo", "cantidad", { opcional: true, etiqueta: "Stock mínimo" }),
     lista("presentaciones", { min: 1, max: 12, etiqueta: "Formas de venta" }),
     ...formaDeVenta("presentaciones.*."),
+    // un producto se relaciona con al menos un proveedor (puede tener varios)
+    body("idsProveedores").isArray({ min: 1, max: 20 }).withMessage("Proveedores: elige al menos uno"),
+    body("idsProveedores.*").isInt({ min: 1 }).withMessage("Proveedores: elige una opción válida").toInt(),
     manejarValidacion,
     c.crear
 );
+router.get("/productos/:id/proveedores", idParam(), manejarValidacion, c.proveedores);
+router.post("/productos/:id/proveedores", catalogo, idParam(), id("idProveedor", { etiqueta: "Proveedor" }),
+    texto("codigoProveedor", "codigo", { etiqueta: "Código del proveedor", opcional: true, max: 40 }), manejarValidacion, c.agregarProveedor);
+router.delete("/productos/:id/proveedores/:idProveedor", catalogo, idParam(), idParam("idProveedor"), manejarValidacion, c.quitarProveedor);
 router.patch("/productos/:id", catalogo, idParam(), ...datosGenerales(true), manejarValidacion, c.actualizar);
 router.post(
     "/productos/:id/variantes",

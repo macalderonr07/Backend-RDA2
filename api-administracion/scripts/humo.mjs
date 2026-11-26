@@ -106,6 +106,7 @@ r = await pedir("/catalogo/productos", {
         idUnidadMedida: "u",
         idTarifaIva: "4",
         uso: "Prueba de humo",
+        idsProveedores: [idProveedor],
         variantes: [{ valores: [negro?.idValorAtributo], stockMinimo: 10 }, { valores: [cafe?.idValorAtributo] }],
         presentaciones: [
             // precios CON IVA (15 %): la base guarda 0.10 y 1.00
@@ -118,11 +119,23 @@ ok(r.status === 201 && r.data.variantes.length === 2 && r.data.variantes.every((
     "POST /catalogo/productos -> 2 variantes × 2 formas de venta con precio", r.json);
 const producto = r.data;
 const codigo = producto?.codigo;
+
+// ---- Proveedores del producto (al menos uno; puede tener varios)
+ok(producto?.proveedores?.length === 1 && producto.proveedores[0].idProveedor === idProveedor, "el producto nace con su proveedor", producto?.proveedores);
+const otroProveedor = (await pedir("/proveedores?limit=5")).data?.find((x) => x.idProveedor !== idProveedor)?.idProveedor;
+r = await pedir(`/catalogo/productos/${producto?.idProducto}/proveedores`, { metodo: "POST", cuerpo: { idProveedor: otroProveedor, codigoProveedor: "REM-77" } });
+ok(r.status === 201 && r.data.length === 2 && r.data.some((x) => x.codigoProveedor === "REM-77"), "se agrega un segundo proveedor con su código", r.json);
+r = await pedir(`/catalogo/productos/${producto?.idProducto}/proveedores/${otroProveedor}`, { metodo: "DELETE" });
+ok(r.status === 200 && r.data.length === 1, "se quita un proveedor", r.json);
+r = await pedir(`/catalogo/productos/${producto?.idProducto}/proveedores/${idProveedor}`, { metodo: "DELETE" });
+ok(r.status === 409, "no se puede quitar el último proveedor -> 409", r.json);
+r = await pedir(`/compras/productos?q=${encodeURIComponent(`humo ${unico}`.toLowerCase())}&idProveedor=${idProveedor}`);
+ok(r.status === 200 && r.data[0]?.del_proveedor === 1, "la orden de compra marca los productos del proveedor elegido", r.json);
 ok(/^CE-7\d{3}$/.test(codigo ?? ""), `código automático en el bloque de herrajes (7xxx): ${codigo}`);
 const docena = producto?.variantes[0].presentaciones.find((p) => p.descripcion === "Docena");
 ok(docena?.precioConIva === 1.15 && docena?.precio === 1, "precio escrito con IVA (1.15) -> base sin IVA 1.00", docena);
 const [varNegro] = producto?.variantes ?? [];
-r = await pedir("/catalogo/productos", { metodo: "POST", cuerpo: { nombre: "Repetidas", idCategoria: categoria?.idCategoria, idUnidadMedida: "u", idTarifaIva: "4", variantes: [{ valores: [negro?.idValorAtributo] }, { valores: [negro?.idValorAtributo] }], presentaciones: [{ descripcion: "Unidad", factor: 1, precioConIva: 1 }] } });
+r = await pedir("/catalogo/productos", { metodo: "POST", cuerpo: { idsProveedores: [idProveedor], nombre: "Repetidas", idCategoria: categoria?.idCategoria, idUnidadMedida: "u", idTarifaIva: "4", variantes: [{ valores: [negro?.idValorAtributo] }, { valores: [negro?.idValorAtributo] }], presentaciones: [{ descripcion: "Unidad", factor: 1, precioConIva: 1 }] } });
 ok(r.status === 422, "variantes repetidas -> 422");
 r = await pedir(`/catalogo/productos/${producto?.idProducto}/precios`, { metodo: "POST", cuerpo: { descripcion: "Docena", precioConIva: 1.09 } });
 ok(r.status === 200 && r.json.meta.preciosRegistrados === 2, "precio nuevo de la Docena en las 2 variantes", r.json);
@@ -237,11 +250,18 @@ seccion("Ventas: cliente -> pedido en tienda -> pago -> factura -> entrega");
 r = await pedir("/clientes", { metodo: "POST", cuerpo: { nombres: `Taller Humo ${unico}`, correo: `humo.${unico.toLowerCase()}@taller.ec` } });
 ok(r.status === 201, "cliente creado", r.json);
 const idCliente = r.data?.idCliente;
+// el sector es obligatorio en los datos de facturacion (la direccion no)
 r = await pedir("/datos-facturacion", {
     metodo: "POST",
-    cuerpo: { idCliente, idTipoIdentificacion: "05", identificacion: cedula("171765432"), razonSocial: `TALLER HUMO ${unico}` },
+    cuerpo: { idCliente, idTipoIdentificacion: "05", identificacion: cedula("171765432"), razonSocial: `TALLER HUMO SIN SECTOR ${unico}` },
 });
-ok(r.status === 201, "datos de facturación con cédula válida", r.json);
+ok(r.status === 422 && r.json?.detalles?.some((d) => d.campo === "idSector"), "datos de facturación sin sector -> 422", r.json);
+const idSectorHumo = (await pedir("/sectores?limit=1")).data?.[0]?.idSector;
+r = await pedir("/datos-facturacion", {
+    metodo: "POST",
+    cuerpo: { idCliente, idTipoIdentificacion: "05", identificacion: cedula("171765432"), razonSocial: `TALLER HUMO ${unico}`, idSector: idSectorHumo },
+});
+ok(r.status === 201, "datos de facturación con cédula válida y sector", r.json);
 const idDatos = r.data?.idDatosFacturacion;
 const unidad = varNegro?.presentaciones.find((p) => p.descripcion === "Unidad");
 r = await pedir("/ventas/pedidos", { metodo: "POST", cuerpo: { idCliente, canal: "TDA", lineas: [{ idPresentacion: unidad?.idPresentacion, cantidad: 10 }] } });
@@ -334,6 +354,59 @@ r = await pedir("/reportes/ventas-por-periodo?desde=2026-12-01&hasta=2026-11-01"
 ok(r.status === 422, "período al revés -> 422");
 r = await pedir("/reportes/no-existe");
 ok(r.status === 404, "reporte desconocido -> 404");
+
+// ------------------------------------------------------------ Cotizaciones
+// La tienda envia la cotizacion (API de la tienda); aqui se edita y se confirma.
+seccion("Cotizaciones de la tienda: editar, confirmar, descartar");
+{
+    const TIENDA = process.env.TIENDA_API_URL ?? "http://localhost:5050/api/v1";
+    const tienda = async (ruta, metodo = "GET", cuerpo) => {
+        const x = await fetch(TIENDA + ruta, { method: metodo, headers: cuerpo ? { "Content-Type": "application/json" } : {}, body: cuerpo ? JSON.stringify(cuerpo) : undefined });
+        return { status: x.status, data: (await x.json().catch(() => null))?.data };
+    };
+    const enviarCotizacion = async () => {
+        const lista = (await tienda("/productos?limit=50")).data ?? [];
+        const pres = lista.filter((x) => !x.porPieza && !x.cortesEstandar).flatMap((x) => x.presentaciones).filter((x) => x.disponible >= 3 && Number.isInteger(x.incremento));
+        const { data: carrito } = await tienda("/carritos", "POST");
+        await tienda(`/carritos/${carrito.token}/items`, "POST", { idPresentacion: pres[0].idPresentacion, cantidad: Math.max(1, pres[0].cantidadMinima) });
+        await tienda(`/carritos/${carrito.token}/cliente`, "POST", { nombres: "Cotización Humo", correo: `cot.${unico}.${Math.random().toString(36).slice(2, 7)}@example.com`, telefono: "0999999999" });
+        const r1 = await tienda(`/carritos/${carrito.token}/pedido`, "POST", { observacion: "Humo: cotización" });
+        return { id: r1.data?.idCotizacion, otra: pres.find((x) => x.idPresentacion !== pres[0].idPresentacion) };
+    };
+    const { id: idCot, otra } = await enviarCotizacion();
+    if (!idCot) {
+        ok(false, "la tienda envía la cotización (¿API de la tienda corriendo en TIENDA_API_URL?)");
+    } else {
+        r = await pedir("/ventas/cotizaciones");
+        ok(r.status === 200 && r.data.some((x) => x.id === idCot && x.estado === "PENDIENTE" && /^COT-\d{6}$/.test(x.numero)), "la cotización aparece como venta por confirmar", r.json);
+        r = await pedir(`/ventas/cotizaciones/${idCot}`);
+        const linea = r.data?.lineas?.[0];
+        ok(r.status === 200 && r.data.editable && linea && r.data.totalEstimado > 0, "detalle: líneas con precio actual y total estimado", r.json);
+        r = await pedir(`/ventas/cotizaciones/${idCot}/lineas/${linea?.id_cotizacion_linea}`, { metodo: "PATCH", cuerpo: { cantidad: 2 } });
+        ok(r.status === 200 && r.data.lineas[0].cantidad === 2, "se edita la cantidad de una línea", r.json);
+        r = await pedir(`/ventas/cotizaciones/${idCot}/lineas`, { metodo: "POST", cuerpo: { idPresentacion: otra?.idPresentacion, cantidad: 1 } });
+        ok(r.status === 201 && r.data.lineas.length === 2, "se agrega un producto a la cotización", r.json);
+        r = await pedir(`/ventas/cotizaciones/${idCot}/lineas/${r.data?.lineas?.[1]?.id_cotizacion_linea}`, { metodo: "DELETE" });
+        ok(r.status === 200 && r.data.lineas.length === 1, "se quita un producto", r.json);
+        r = await pedir(`/ventas/cotizaciones/${idCot}/confirmar`, { metodo: "POST" });
+        const idPedidoCot = r.data?.idPedido;
+        ok(r.status === 201 && idPedidoCot > 0, "confirmar la cotización crea el pedido (reserva el stock)", r.json);
+        r = await pedir(`/ventas/pedidos/${idPedidoCot}`);
+        ok(r.status === 200 && /COT-/.test(JSON.stringify(r.data)), "el pedido nace de la cotización (observación con su número)", r.json);
+        r = await pedir(`/ventas/cotizaciones/${idCot}/confirmar`, { metodo: "POST" });
+        ok(r.status === 409, "no se confirma dos veces -> 409", r.json);
+        r = await pedir(`/ventas/cotizaciones/${idCot}/lineas/${linea?.id_cotizacion_linea}`, { metodo: "PATCH", cuerpo: { cantidad: 3 } });
+        ok(r.status === 409, "una cotización confirmada ya no se edita -> 409", r.json);
+        r = await pedir(`/ventas/pedidos?grupo=pedidos&limit=100`);
+        ok(r.status === 200 && r.data.some((x) => x.id_pedido === idPedidoCot), "el pedido aparece en Pedidos (no en Ventas)", r.json);
+        r = await pedir(`/ventas/pedidos/${idPedidoCot}/estado`, { metodo: "POST", cuerpo: { estado: "CAN", observacion: "Humo: se cancela" } });
+        const { id: idDescartar } = await enviarCotizacion();
+        r = await pedir(`/ventas/cotizaciones/${idDescartar}`, { metodo: "DELETE" });
+        ok(r.status === 204, "una cotización pendiente se puede descartar", r.json);
+        r = await pedir(`/ventas/cotizaciones/${idDescartar}`);
+        ok(r.status === 404, "la descartada ya no existe -> 404");
+    }
+}
 
 console.log(`\n${fallos === 0 ? "✔" : "✖"} ${pruebas - fallos} de ${pruebas} pruebas de humo en orden.`);
 process.exit(fallos === 0 ? 0 : 1);
